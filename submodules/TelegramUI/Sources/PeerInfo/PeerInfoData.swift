@@ -174,6 +174,7 @@ final class PeerInfoScreenData {
     let peer: Peer?
     let chatPeer: Peer?
     let cachedData: CachedPeerData?
+    let currentDate: Date?
     let status: PeerInfoStatusData?
     let notificationSettings: TelegramPeerNotificationSettings?
     let globalNotificationSettings: EngineGlobalNotificationSettings?
@@ -192,6 +193,7 @@ final class PeerInfoScreenData {
         peer: Peer?,
         chatPeer: Peer?,
         cachedData: CachedPeerData?,
+        currentDate: Date?,
         status: PeerInfoStatusData?,
         notificationSettings: TelegramPeerNotificationSettings?,
         globalNotificationSettings: EngineGlobalNotificationSettings?,
@@ -209,6 +211,7 @@ final class PeerInfoScreenData {
         self.peer = peer
         self.chatPeer = chatPeer
         self.cachedData = cachedData
+        self.currentDate = currentDate
         self.status = status
         self.notificationSettings = notificationSettings
         self.globalNotificationSettings = globalNotificationSettings
@@ -460,6 +463,7 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
             peer: peer,
             chatPeer: peer,
             cachedData: peerView.cachedData,
+            currentDate: nil,
             status: nil,
             notificationSettings: nil,
             globalNotificationSettings: nil,
@@ -486,6 +490,7 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 peer: nil,
                 chatPeer: nil,
                 cachedData: nil,
+                currentDate: nil,
                 status: nil,
                 notificationSettings: nil,
                 globalNotificationSettings: nil,
@@ -602,9 +607,10 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 peerInfoAvailableMediaPanes(context: context, peerId: peerId),
                 context.engine.data.subscribe(TelegramEngine.EngineData.Item.NotificationSettings.Global()),
                 secretChatKeyFingerprint,
-                status
+                status,
+                context.dateFetcher.fetchCurrentDate()
             )
-            |> map { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status -> PeerInfoScreenData in
+            |> map { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status, date -> PeerInfoScreenData in
                 var availablePanes = availablePanes
                 if availablePanes != nil, groupsInCommon != nil, let cachedData = peerView.cachedData as? CachedUserData {
                     if cachedData.commonGroupCount != 0 {
@@ -616,6 +622,7 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     peer: peerView.peers[userPeerId],
                     chatPeer: peerView.peers[peerId],
                     cachedData: peerView.cachedData,
+                    currentDate: date,
                     status: status,
                     notificationSettings: peerView.notificationSettings as? TelegramPeerNotificationSettings,
                     globalNotificationSettings: globalNotificationSettings,
@@ -659,9 +666,10 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 invitationsContextPromise.get(),
                 invitationsStatePromise.get(),
                 requestsContextPromise.get(),
-                requestsStatePromise.get()
+                requestsStatePromise.get(),
+                context.dateFetcher.fetchCurrentDate()
             )
-            |> map { peerView, availablePanes, globalNotificationSettings, status, currentInvitationsContext, invitations, currentRequestsContext, requests -> PeerInfoScreenData in
+            |> map { peerView, availablePanes, globalNotificationSettings, status, currentInvitationsContext, invitations, currentRequestsContext, requests, date -> PeerInfoScreenData in
                 var discussionPeer: Peer?
                 if case let .known(maybeLinkedDiscussionPeerId) = (peerView.cachedData as? CachedChannelData)?.linkedDiscussionPeerId, let linkedDiscussionPeerId = maybeLinkedDiscussionPeerId, let peer = peerView.peers[linkedDiscussionPeerId] {
                     discussionPeer = peer
@@ -691,6 +699,7 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     peer: peerView.peers[peerId],
                     chatPeer: peerView.peers[peerId],
                     cachedData: peerView.cachedData,
+                    currentDate: date,
                     status: status,
                     notificationSettings: peerView.notificationSettings as? TelegramPeerNotificationSettings,
                     globalNotificationSettings: globalNotificationSettings,
@@ -812,9 +821,10 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                 invitationsContextPromise.get(),
                 invitationsStatePromise.get(),
                 requestsContextPromise.get(),
-                requestsStatePromise.get()
+                requestsStatePromise.get(),
+                                 context.dateFetcher.fetchCurrentDate()
             )
-            |> map { peerView, availablePanes, globalNotificationSettings, status, membersData, currentInvitationsContext, invitations, currentRequestsContext, requests -> PeerInfoScreenData in
+            |> map { peerView, availablePanes, globalNotificationSettings, status, membersData, currentInvitationsContext, invitations, currentRequestsContext, requests, date -> PeerInfoScreenData in
                 var discussionPeer: Peer?
                 if case let .known(maybeLinkedDiscussionPeerId) = (peerView.cachedData as? CachedChannelData)?.linkedDiscussionPeerId, let linkedDiscussionPeerId = maybeLinkedDiscussionPeerId, let peer = peerView.peers[linkedDiscussionPeerId] {
                     discussionPeer = peer
@@ -859,6 +869,7 @@ func peerInfoScreenData(context: AccountContext, peerId: PeerId, strings: Presen
                     peer: peerView.peers[groupId],
                     chatPeer: peerView.peers[groupId],
                     cachedData: peerView.cachedData,
+                    currentDate: date,
                     status: status,
                     notificationSettings: peerView.notificationSettings as? TelegramPeerNotificationSettings,
                     globalNotificationSettings: globalNotificationSettings,

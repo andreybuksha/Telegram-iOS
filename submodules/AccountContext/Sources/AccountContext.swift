@@ -857,6 +857,7 @@ public protocol AccountContext: AnyObject {
     var liveLocationManager: LiveLocationManager? { get }
     var peersNearbyManager: PeersNearbyManager? { get }
     var fetchManager: FetchManager { get }
+    var dateFetcher: DateFetcher { get }
     var prefetchManager: PrefetchManager? { get }
     var downloadedMediaStoreManager: DownloadedMediaStoreManager { get }
     var peerChannelMemberCategoriesContextsManager: PeerChannelMemberCategoriesContextsManager { get }

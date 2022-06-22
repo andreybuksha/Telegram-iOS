@@ -899,7 +899,7 @@ private func infoItems(data: PeerInfoScreenData?, context: AccountContext, prese
     
     if let user = data.peer as? TelegramUser {
         if !callMessages.isEmpty {
-            items[.calls]!.append(PeerInfoScreenCallListItem(id: 20, messages: callMessages))
+            items[.calls]!.append(PeerInfoScreenCallListItem(id: 20, messages: callMessages, currentDate: data.currentDate))
         }
         
         if let phone = user.phone {
@@ -1657,6 +1657,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, UIScrollViewDelegate 
         return self._chatInterfaceInteraction!
     }
     private var hiddenMediaDisposable: Disposable?
+    private var dateFetchDisposable: Disposable?
     private let hiddenAvatarRepresentationDisposable = MetaDisposable()
     
     private var resolvePeerByNameDisposable: MetaDisposable?
@@ -2368,6 +2369,9 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, UIScrollViewDelegate 
             strongSelf.chatInterfaceInteraction.hiddenMedia = hiddenMedia
             strongSelf.paneContainerNode.updateHiddenMedia()
         })
+//        self.dateFetchDisposable = context.dateFetcher.fetchCurrentDate().start(next: { [weak self] date in
+//
+//        })
         
         self.backgroundColor = self.presentationData.theme.list.blocksBackgroundColor
         
@@ -3105,6 +3109,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, UIScrollViewDelegate 
     deinit {
         self.dataDisposable?.dispose()
         self.hiddenMediaDisposable?.dispose()
+        self.dateFetchDisposable?.dispose()
         self.activeActionDisposable.dispose()
         self.resolveUrlDisposable.dispose()
         self.hiddenAvatarRepresentationDisposable.dispose()
