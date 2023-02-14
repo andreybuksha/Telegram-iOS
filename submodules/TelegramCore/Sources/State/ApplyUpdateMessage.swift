@@ -41,13 +41,36 @@ func applyMediaResourceChanges(from: Media, to: Media, postbox: Postbox, force: 
     }
 }
 
-func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, message: Message, result: Api.Updates, accountPeerId: PeerId) -> Signal<Void, NoError> {
+func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, message: Message, cacheReferenceKey: CachedSentMediaReferenceKey?, result: Api.Updates, accountPeerId: PeerId) -> Signal<Void, NoError> {
     return postbox.transaction { transaction -> Void in
         let messageId: Int32?
         var apiMessage: Api.Message?
         
+        var correspondingMessageId: Int32?
+        
+        for update in result.allUpdates {
+            switch update {
+            case let .updateMessageID(id, randomId):
+                for attribute in message.attributes {
+                    if let attribute = attribute as? OutgoingMessageInfoAttribute {
+                        if attribute.uniqueId == randomId {
+                            correspondingMessageId = id
+                            break
+                        }
+                    }
+                }
+            default:
+                break
+            }
+        }
+        
         for resultMessage in result.messages {
             if let id = resultMessage.id() {
+                if let correspondingMessageId = correspondingMessageId {
+                    if id.id != correspondingMessageId {
+                        continue
+                    }
+                }
                 if id.peerId == message.id.peerId {
                     apiMessage = resultMessage
                     break
@@ -91,6 +114,8 @@ func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, mes
         
         var updatedMessage: StoreMessage?
         
+        var bubbleUpEmojiOrStickersets: [ItemCollectionId] = []
+        
         transaction.updateMessage(message.id, update: { currentMessage in
             let updatedId: MessageId
             if let messageId = messageId {
@@ -107,17 +132,23 @@ func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, mes
                 updatedId = currentMessage.id
             }
             
+            for attribute in currentMessage.attributes {
+                if let attribute = attribute as? OutgoingMessageInfoAttribute {
+                    bubbleUpEmojiOrStickersets = attribute.bubbleUpEmojiOrStickersets
+                }
+            }
+            
             let media: [Media]
             var attributes: [MessageAttribute]
             let text: String
             let forwardInfo: StoreMessageForwardInfo?
-            if let apiMessage = apiMessage, let updatedMessage = StoreMessage(apiMessage: apiMessage) {
+            if let apiMessage = apiMessage, let apiMessagePeerId = apiMessage.peerId, let updatedMessage = StoreMessage(apiMessage: apiMessage, peerIsForum: transaction.getPeer(apiMessagePeerId)?.isForum ?? false) {
                 media = updatedMessage.media
                 attributes = updatedMessage.attributes
                 text = updatedMessage.text
                 forwardInfo = updatedMessage.forwardInfo
             } else if case let .updateShortSentMessage(_, _, _, _, _, apiMedia, entities, ttlPeriod) = result {
-                let (mediaValue, _) = textMediaAndExpirationTimerFromApiMedia(apiMedia, currentMessage.id.peerId)
+                let (mediaValue, _, nonPremium, hasSpoiler) = textMediaAndExpirationTimerFromApiMedia(apiMedia, currentMessage.id.peerId)
                 if let mediaValue = mediaValue {
                     media = [mediaValue]
                 } else {
@@ -138,6 +169,15 @@ func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, mes
                 updatedAttributes = updatedAttributes.filter({ !($0 is AutoremoveTimeoutMessageAttribute) })
                 if let ttlPeriod = ttlPeriod {
                     updatedAttributes.append(AutoremoveTimeoutMessageAttribute(timeout: ttlPeriod, countdownBeginTime: updatedTimestamp))
+                }
+                
+                updatedAttributes = updatedAttributes.filter({ !($0 is NonPremiumMessageAttribute) })
+                if let nonPremium = nonPremium, nonPremium {
+                    updatedAttributes.append(NonPremiumMessageAttribute())
+                }
+                
+                if let hasSpoiler = hasSpoiler, hasSpoiler {
+                    updatedAttributes.append(MediaSpoilerMessageAttribute())
                 }
                 
                 if Namespaces.Message.allScheduled.contains(message.id.namespace) && updatedId.namespace == Namespaces.Message.Cloud {
@@ -244,6 +284,27 @@ func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, mes
                     }
                 }
             }
+            
+            if updatedMessage.id.namespace == Namespaces.Message.Cloud, let cacheReferenceKey = cacheReferenceKey {
+                var storeMedia: Media?
+                var mediaCount = 0
+                for media in updatedMessage.media {
+                    if let image = media as? TelegramMediaImage {
+                        storeMedia = image
+                        mediaCount += 1
+                    } else if let file = media as? TelegramMediaFile {
+                        storeMedia = file
+                        mediaCount += 1
+                    }
+                }
+                if mediaCount > 1 {
+                    storeMedia = nil
+                }
+                
+                if let storeMedia = storeMedia {
+                    storeCachedSentMediaReference(transaction: transaction, key: cacheReferenceKey, media: storeMedia)
+                }
+            }
         }
         for file in sentStickers {
             if let entry = CodableEntry(RecentMediaItem(file)) {
@@ -256,6 +317,9 @@ func applyUpdateMessage(postbox: Postbox, stateManager: AccountStateManager, mes
                     transaction.addOrMoveToFirstPositionOrderedItemListItem(collectionId: Namespaces.OrderedItemList.CloudRecentGifs, item: OrderedItemListEntry(id: RecentMediaItemId(file.fileId).rawValue, contents: entry), removeTailIfCountExceeds: 200)
                 }
             }
+        }
+        if !bubbleUpEmojiOrStickersets.isEmpty {
+            applyBubbleUpEmojiOrStickersets(transaction: transaction, ids: bubbleUpEmojiOrStickersets)
         }
         
         stateManager.addUpdates(result)
@@ -278,7 +342,14 @@ func applyUpdateGroupMessages(postbox: Postbox, stateManager: AccountStateManage
         
         var resultMessages: [MessageId: StoreMessage] = [:]
         for apiMessage in result.messages {
-            if let resultMessage = StoreMessage(apiMessage: apiMessage, namespace: namespace), case let .Id(id) = resultMessage.id {
+            var peerIsForum = false
+            if let apiMessagePeerId = apiMessage.peerId, let peer = transaction.getPeer(apiMessagePeerId) {
+                if peer.isForum {
+                    peerIsForum = true
+                }
+            }
+            
+            if let resultMessage = StoreMessage(apiMessage: apiMessage, peerIsForum: peerIsForum, namespace: namespace), case let .Id(id) = resultMessage.id {
                 resultMessages[id] = resultMessage
             }
         }
@@ -330,6 +401,8 @@ func applyUpdateGroupMessages(postbox: Postbox, stateManager: AccountStateManage
             transaction.updateMessageGroupingKeysAtomically(ids, groupingKey: key)
         }
         
+        var bubbleUpEmojiOrStickersets: [ItemCollectionId] = []
+        
         for (message, _, updatedMessage) in mapping {
             transaction.updateMessage(message.id, update: { currentMessage in
                 let updatedId: MessageId
@@ -337,6 +410,16 @@ func applyUpdateGroupMessages(postbox: Postbox, stateManager: AccountStateManage
                     updatedId = id
                 } else {
                     updatedId = currentMessage.id
+                }
+                
+                for attribute in currentMessage.attributes {
+                    if let attribute = attribute as? OutgoingMessageInfoAttribute {
+                        for id in attribute.bubbleUpEmojiOrStickersets {
+                            if !bubbleUpEmojiOrStickersets.contains(id) {
+                                bubbleUpEmojiOrStickersets.append(id)
+                            }
+                        }
+                    }
                 }
                 
                 let media: [Media]
@@ -404,7 +487,36 @@ func applyUpdateGroupMessages(postbox: Postbox, stateManager: AccountStateManage
                 }
             }
         }
+        if !bubbleUpEmojiOrStickersets.isEmpty {
+            applyBubbleUpEmojiOrStickersets(transaction: transaction, ids: bubbleUpEmojiOrStickersets)
+        }
         stateManager.addUpdates(result)
         stateManager.addUpdateGroups([.ensurePeerHasLocalState(id: messages[0].id.peerId)])
+    }
+}
+
+private func applyBubbleUpEmojiOrStickersets(transaction: Transaction, ids: [ItemCollectionId]) {
+    let namespaces: [ItemCollectionId.Namespace] = [Namespaces.ItemCollection.CloudStickerPacks, Namespaces.ItemCollection.CloudEmojiPacks]
+    for namespace in namespaces {
+        let namespaceIds = ids.filter { $0.namespace == namespace }
+        if !namespaceIds.isEmpty {
+            let infos = transaction.getItemCollectionsInfos(namespace: namespace)
+            
+            var packDict: [ItemCollectionId: Int] = [:]
+            for i in 0 ..< infos.count {
+                packDict[infos[i].0] = i
+            }
+            var topSortedPacks: [(ItemCollectionId, ItemCollectionInfo)] = []
+            var processedPacks = Set<ItemCollectionId>()
+            for id in namespaceIds {
+                if let index = packDict[id] {
+                    topSortedPacks.append(infos[index])
+                    processedPacks.insert(id)
+                }
+            }
+            let restPacks = infos.filter { !processedPacks.contains($0.0) }
+            let sortedPacks = topSortedPacks + restPacks
+            transaction.replaceItemCollectionInfos(namespace: namespace, itemCollectionInfos: sortedPacks)
+        }
     }
 }

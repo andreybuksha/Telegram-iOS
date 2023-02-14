@@ -44,6 +44,8 @@ private func getCoveringViewSnaphot(window: Window1) -> UIImage? {
         context.clear(CGRect(origin: CGPoint(), size: size))
         context.scaleBy(x: scale, y: scale)
         UIGraphicsPushContext(context)
+
+        window.badgeView.alpha = 0.0
         window.forEachViewController({ controller in
             if let controller = controller as? PasscodeEntryController {
                 controller.displayNode.alpha = 0.0
@@ -57,6 +59,8 @@ private func getCoveringViewSnaphot(window: Window1) -> UIImage? {
             }
             return true
         })
+        window.badgeView.alpha = 1.0
+        
         UIGraphicsPopContext()
     }).flatMap(applyScreenshotEffectToImage)
 }
@@ -128,6 +132,10 @@ public final class AppLockContextImpl: AppLockContext {
                 if !strongSelf.lastActiveValue {
                     strongSelf.lastActiveValue = true
                     strongSelf.lastActiveTimestamp = timestamp
+                    
+                    if let data = try? Data(contentsOf: URL(fileURLWithPath: appLockStatePath(rootPath: strongSelf.rootPath))), let current = try? JSONDecoder().decode(LockState.self, from: data) {
+                        strongSelf.currentStateValue = current
+                    }
                 }
                 
                 if let lastActiveTimestamp = strongSelf.lastActiveTimestamp {
@@ -308,8 +316,8 @@ public final class AppLockContextImpl: AppLockContext {
     public var invalidAttempts: Signal<AccessChallengeAttempts?, NoError> {
         return self.currentState.get()
         |> map { state in
-            return state.unlockAttemts.flatMap { unlockAttemts in
-                return AccessChallengeAttempts(count: unlockAttemts.count, bootTimestamp: unlockAttemts.timestamp.bootTimestamp, uptime: unlockAttemts.timestamp.uptime)
+            return state.unlockAttempts.flatMap { unlockAttempts in
+                return AccessChallengeAttempts(count: unlockAttempts.count, bootTimestamp: unlockAttempts.timestamp.bootTimestamp, uptime: unlockAttempts.timestamp.uptime)
             }
         }
     }
@@ -338,7 +346,7 @@ public final class AppLockContextImpl: AppLockContext {
         self.updateLockState { state in
             var state = state
             
-            state.unlockAttemts = nil
+            state.unlockAttempts = nil
             
             state.isManuallyLocked = false
             
@@ -354,16 +362,16 @@ public final class AppLockContextImpl: AppLockContext {
     public func failedUnlockAttempt() {
         self.updateLockState { state in
             var state = state
-            var unlockAttemts = state.unlockAttemts ?? UnlockAttempts(count: 0, timestamp: MonotonicTimestamp(bootTimestamp: 0, uptime: 0))
+            var unlockAttempts = state.unlockAttempts ?? UnlockAttempts(count: 0, timestamp: MonotonicTimestamp(bootTimestamp: 0, uptime: 0))
             
-            unlockAttemts.count += 1
+            unlockAttempts.count += 1
             
             var bootTimestamp: Int32 = 0
             let uptime = getDeviceUptimeSeconds(&bootTimestamp)
             let timestamp = MonotonicTimestamp(bootTimestamp: bootTimestamp, uptime: uptime)
             
-            unlockAttemts.timestamp = timestamp
-            state.unlockAttemts = unlockAttemts
+            unlockAttempts.timestamp = timestamp
+            state.unlockAttempts = unlockAttempts
             return state
         }
     }

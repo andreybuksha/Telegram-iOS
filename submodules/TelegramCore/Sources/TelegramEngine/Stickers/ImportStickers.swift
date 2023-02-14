@@ -24,7 +24,7 @@ private enum UploadedStickerDataContent {
 }
 
 private func uploadedSticker(postbox: Postbox, network: Network, resource: MediaResource) -> Signal<UploadedStickerData, NoError> {
-    return multipartUpload(network: network, postbox: postbox, source: .resource(.standalone(resource: resource)), encrypt: false, tag: TelegramMediaResourceFetchTag(statsCategory: .file), hintFileSize: nil, hintFileIsLarge: false, forceNoBigParts: false)
+    return multipartUpload(network: network, postbox: postbox, source: .resource(.standalone(resource: resource)), encrypt: false, tag: TelegramMediaResourceFetchTag(statsCategory: .stickers, userContentType: .sticker), hintFileSize: nil, hintFileIsLarge: false, forceNoBigParts: false)
     |> map { result -> UploadedStickerData in
         return UploadedStickerData(resource: resource, content: .result(result))
     }
@@ -167,12 +167,14 @@ func _internal_createStickerSet(account: Account, title: String, shortName: Stri
                     switch result {
                     case .stickerSetNotModified:
                         return .complete()
-                    case let .stickerSet(set, packs, documents):
+                    case let .stickerSet(set, packs, keywords, documents):
                         let namespace: ItemCollectionId.Namespace
                         switch set {
-                            case let .stickerSet(flags, _, _, _, _, _, _, _, _, _, _):
+                            case let .stickerSet(flags, _, _, _, _, _, _, _, _, _, _, _):
                                 if (flags & (1 << 3)) != 0 {
                                     namespace = Namespaces.ItemCollection.CloudMaskPacks
+                                } else if (flags & (1 << 7)) != 0 {
+                                    namespace = Namespaces.ItemCollection.CloudEmojiPacks
                                 } else {
                                     namespace = Namespaces.ItemCollection.CloudStickerPacks
                                 }
@@ -191,6 +193,20 @@ func _internal_createStickerSet(account: Account, title: String, shortName: Stri
                                             indexKeysByFile[mediaId]!.append(key)
                                         }
                                     }
+                            }
+                        }
+                        for keyword in keywords {
+                            switch keyword {
+                            case let .stickerKeyword(documentId, texts):
+                                for text in texts {
+                                    let key = ValueBoxKey(text).toMemoryBuffer()
+                                    let mediaId = MediaId(namespace: Namespaces.Media.CloudFile, id: documentId)
+                                    if indexKeysByFile[mediaId] == nil {
+                                        indexKeysByFile[mediaId] = [key]
+                                    } else {
+                                        indexKeysByFile[mediaId]!.append(key)
+                                    }
+                                }
                             }
                         }
                         

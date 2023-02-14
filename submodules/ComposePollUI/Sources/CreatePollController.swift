@@ -516,16 +516,51 @@ public final class ComposedPoll {
     }
 }
 
-private class CreatePollControllerImpl: ItemListController, AttachmentContainable {
+private final class CreatePollContext: AttachmentMediaPickerContext {
+    var selectionCount: Signal<Int, NoError> {
+        return .single(0)
+    }
+    
+    var caption: Signal<NSAttributedString?, NoError> {
+        return .single(nil)
+    }
+    
+    public var loadingProgress: Signal<CGFloat?, NoError> {
+        return .single(nil)
+    }
+    
+    public var mainButtonState: Signal<AttachmentMainButtonState?, NoError> {
+        return .single(nil)
+    }
+            
+    func setCaption(_ caption: NSAttributedString) {
+    }
+    
+    func send(silently: Bool, mode: AttachmentMediaPickerSendMode) {
+    }
+    
+    func schedule() {
+    }
+    
+    func mainButtonAction() {
+    }
+}
+
+
+public class CreatePollControllerImpl: ItemListController, AttachmentContainable {
     public var requestAttachmentMenuExpansion: () -> Void = {}
     public var updateNavigationStack: (@escaping ([AttachmentContainable]) -> ([AttachmentContainable], AttachmentMediaPickerContext?)) -> Void = { _ in }
     public var updateTabBarAlpha: (CGFloat, ContainedViewLayoutTransition) -> Void = { _, _ in }
     public var cancelPanGesture: () -> Void = { }
     public var isContainerPanning: () -> Bool = { return false }
     public var isContainerExpanded: () -> Bool = { return false }
+    
+    public var mediaPickerContext: AttachmentMediaPickerContext? {
+        return CreatePollContext()
+    }
 }
 
-public func createPollController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, peer: EnginePeer, isQuiz: Bool? = nil, completion: @escaping (ComposedPoll) -> Void) -> AttachmentContainable {
+public func createPollController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, peer: EnginePeer, isQuiz: Bool? = nil, completion: @escaping (ComposedPoll) -> Void) -> CreatePollControllerImpl {
     var initialState = CreatePollControllerState()
     if let isQuiz = isQuiz {
         initialState.isQuiz = isQuiz
@@ -798,8 +833,8 @@ public func createPollController(context: AccountContext, updatedPresentationDat
     )
     |> map { presentationData, state, limitsConfiguration -> (ItemListControllerState, (ItemListNodeState, Any)) in
         var presentationData = presentationData
-        if presentationData.theme.list.blocksBackgroundColor.rgb == 0x000000 {
-            let updatedTheme = presentationData.theme.withInvertedBlocksBackground()
+        if presentationData.theme.list.blocksBackgroundColor.rgb == presentationData.theme.list.plainBackgroundColor.rgb {
+            let updatedTheme = presentationData.theme.withModalBlocksBackground()
             presentationData = presentationData.withUpdated(theme: updatedTheme)
         }
         
@@ -932,15 +967,9 @@ public func createPollController(context: AccountContext, updatedPresentationDat
     weak var currentTooltipController: TooltipController?
     let controller = CreatePollControllerImpl(context: context, state: signal)
     controller.navigationPresentation = .modal
-//    controller.visibleBottomContentOffsetChanged = { [weak controller] offset in
-//        switch offset {
-//            case let .known(value):
-//                let backgroundAlpha: CGFloat = min(30.0, value) / 30.0
-//                controller?.updateTabBarAlpha(backgroundAlpha, .immediate)
-//            case .unknown, .none:
-//                controller?.updateTabBarAlpha(1.0, .immediate)
-//        }
-//    }
+    controller.visibleBottomContentOffsetChanged = { [weak controller] _ in
+        controller?.updateTabBarAlpha(1.0, .immediate)
+    }
     presentControllerImpl = { [weak controller] c, a in
         controller?.present(c, in: .window(.root), with: a)
     }

@@ -51,7 +51,7 @@ final class NavigationModalContainer: ASDisplayNode, UIScrollViewDelegate, UIGes
         
         self.scrollNode = ASScrollNode()
         
-        self.container = NavigationContainer(controllerRemoved: controllerRemoved)
+        self.container = NavigationContainer(isFlat: false, controllerRemoved: controllerRemoved)
         self.container.clipsToBounds = true
         
         super.init()
@@ -97,6 +97,9 @@ final class NavigationModalContainer: ASDisplayNode, UIScrollViewDelegate, UIGes
             }
             return .right
         })
+        if #available(iOS 13.4, *) {
+            panRecognizer.allowedScrollTypesMask = .continuous
+        }
         self.panRecognizer = panRecognizer
         if let layout = self.validLayout {
             switch layout.metrics.widthClass {
@@ -112,6 +115,24 @@ final class NavigationModalContainer: ASDisplayNode, UIScrollViewDelegate, UIGes
         if !self.isFlat {
             self.view.addGestureRecognizer(panRecognizer)
             self.dim.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapGesture(_:))))
+        }
+    }
+    
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer == self.panRecognizer, let gestureRecognizer = self.panRecognizer, gestureRecognizer.numberOfTouches == 0 {
+            let translation = gestureRecognizer.velocity(in: gestureRecognizer.view)
+            if abs(translation.y) > 4.0 && abs(translation.y) > abs(translation.x) * 2.5 {
+                return false
+            }
+            if translation.x < 4.0 {
+                return false
+            }
+            if self.isDismissed {
+                return false
+            }
+            return true
+        } else {
+            return true
         }
     }
     
@@ -408,7 +429,10 @@ final class NavigationModalContainer: ASDisplayNode, UIScrollViewDelegate, UIGes
             
             let maxSide = max(layout.size.width, layout.size.height)
             let minSide = min(layout.size.width, layout.size.height)
-            let containerSize = CGSize(width: min(layout.size.width - 20.0, floor(maxSide / 2.0)), height: min(layout.size.height, minSide) - verticalInset * 2.0)
+            var containerSize = CGSize(width: min(layout.size.width - 20.0, floor(maxSide / 2.0)), height: min(layout.size.height, minSide) - verticalInset * 2.0)
+            if let preferredSize = controllers.last?.preferredContentSizeForLayout(layout) {
+                containerSize = preferredSize
+            }
             containerFrame = CGRect(origin: CGPoint(x: floor((layout.size.width - containerSize.width) / 2.0), y: floor((layout.size.height - containerSize.height) / 2.0)), size: containerSize)
             containerScale = 1.0
             
@@ -521,6 +545,9 @@ final class NavigationModalContainer: ASDisplayNode, UIScrollViewDelegate, UIGes
                 } else if listNode.scroller.isDecelerating && listNode.scroller.contentOffset.y < listNode.scroller.contentInset.top {
                     return self.scrollNode.view
                 }
+            } else if let currentParent, currentParent.disablesInteractiveModalDismiss {
+                enableScrolling = false
+                break
             }
             currentParent = currentParent?.superview
         }

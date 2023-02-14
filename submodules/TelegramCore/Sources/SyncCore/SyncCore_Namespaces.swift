@@ -46,6 +46,11 @@ public struct Namespaces {
         public static let CloudDice: Int32 = 4
         public static let CloudAnimatedEmojiAnimations: Int32 = 5
         public static let CloudAnimatedEmojiReactions: Int32 = 6
+        public static let CloudPremiumGifts: Int32 = 7
+        public static let CloudEmojiPacks: Int32 = 8
+        public static let CloudEmojiGenericAnimations: Int32 = 9
+        public static let CloudIconStatusEmoji: Int32 = 10
+        public static let CloudIconTopicEmoji: Int32 = 11
     }
     
     public struct OrderedItemList {
@@ -63,6 +68,17 @@ public struct Namespaces {
         public static let RecentDownloads: Int32 = 11
         public static let PremiumStickers: Int32 = 12
         public static let CloudPremiumStickers: Int32 = 13
+        public static let LocalRecentEmoji: Int32 = 14
+        public static let CloudFeaturedEmojiPacks: Int32 = 15
+        public static let CloudAllPremiumStickers: Int32 = 16
+        public static let CloudRecentStatusEmoji: Int32 = 17
+        public static let CloudFeaturedStatusEmoji: Int32 = 18
+        public static let CloudRecentReactions: Int32 = 19
+        public static let CloudTopReactions: Int32 = 20
+        public static let CloudEmojiCategories: Int32 = 21
+        public static let CloudEmojiStatusCategories: Int32 = 22
+        public static let CloudFeaturedProfilePhotoEmoji: Int32 = 23
+        public static let CloudFeaturedGroupPhotoEmoji: Int32 = 24
     }
     
     public struct CachedItemCollection {
@@ -88,6 +104,8 @@ public struct Namespaces {
         public static let notificationSoundList: Int8 = 22
         public static let attachMenuBots: Int8 = 23
         public static let featuredStickersConfiguration: Int8 = 24
+        public static let emojiSearchCategories: Int8 = 25
+        public static let cachedEmojiQueryResults: Int8 = 26
     }
     
     public struct UnorderedItemList {
@@ -164,6 +182,8 @@ public struct OperationLogTags {
     public static let SynchronizeEmojiKeywords = PeerOperationLogTag(value: 19)
     public static let SynchronizeChatListFilters = PeerOperationLogTag(value: 20)
     public static let SynchronizeMarkAllUnseenReactions = PeerOperationLogTag(value: 21)
+    public static let SynchronizeInstalledEmoji = PeerOperationLogTag(value: 22)
+    public static let SynchronizeAutosaveItems = PeerOperationLogTag(value: 23)
 }
 
 public struct LegacyPeerSummaryCounterTags: OptionSet, Sequence, Hashable {
@@ -226,7 +246,6 @@ private enum PreferencesKeyValues: Int32 {
     case appConfiguration = 14
     case searchBotsConfiguration = 15
     case contactsSettings = 16
-    case walletCollection = 18
     case contentSettings = 19
     case chatListFilters = 20
     case peersNearby = 21
@@ -234,6 +253,8 @@ private enum PreferencesKeyValues: Int32 {
     case secretChatSettings = 23
     case reactionSettings = 24
     case premiumPromo = 26
+    case globalMessageAutoremoveTimeoutSettings = 27
+    case accountSpecificCacheStorageSettings = 28
 }
 
 public func applicationSpecificPreferencesKey(_ value: Int32) -> ValueBoxKey {
@@ -326,13 +347,7 @@ public struct PreferencesKeys {
         key.setInt32(0, value: PreferencesKeyValues.secretChatSettings.rawValue)
         return key
     }()
-    
-    public static let walletCollection: ValueBoxKey = {
-        let key = ValueBoxKey(length: 4)
-        key.setInt32(0, value: PreferencesKeyValues.walletCollection.rawValue)
-        return key
-    }()
-    
+        
     public static let contentSettings: ValueBoxKey = {
         let key = ValueBoxKey(length: 4)
         key.setInt32(0, value: PreferencesKeyValues.contentSettings.rawValue)
@@ -366,6 +381,18 @@ public struct PreferencesKeys {
     public static let premiumPromo: ValueBoxKey = {
         let key = ValueBoxKey(length: 4)
         key.setInt32(0, value: PreferencesKeyValues.premiumPromo.rawValue)
+        return key
+    }()
+    
+    public static let globalMessageAutoremoveTimeoutSettings: ValueBoxKey = {
+        let key = ValueBoxKey(length: 4)
+        key.setInt32(0, value: PreferencesKeyValues.globalMessageAutoremoveTimeoutSettings.rawValue)
+        return key
+    }()
+    
+    public static let accountSpecificCacheStorageSettings: ValueBoxKey = {
+        let key = ValueBoxKey(length: 4)
+        key.setInt32(0, value: PreferencesKeyValues.accountSpecificCacheStorageSettings.rawValue)
         return key
     }()
 }

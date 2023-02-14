@@ -53,6 +53,8 @@ final class ShareSearchBarNode: ASDisplayNode, UITextFieldDelegate {
         self.textInputNode.textField.tintColor = theme.actionSheet.controlAccentColor
         self.textInputNode.textField.returnKeyType = .search
         self.textInputNode.textField.accessibilityTraits = .searchField
+        self.textInputNode.textField.spellCheckingType = .no
+        self.textInputNode.textField.autocorrectionType = .no
         
         super.init()
         
@@ -97,6 +99,11 @@ final class ShareSearchBarNode: ASDisplayNode, UITextFieldDelegate {
     @objc func textFieldDidChangeText() {
         self.clearButton.isHidden = self.textInputNode.textField.text?.isEmpty ?? true
         self.textUpdated?(self.textInputNode.textField.text ?? "")
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.deactivateInput()
+        return true
     }
     
     @objc func clearPressed() {

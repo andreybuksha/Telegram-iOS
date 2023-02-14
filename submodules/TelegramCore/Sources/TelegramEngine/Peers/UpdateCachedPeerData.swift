@@ -79,7 +79,7 @@ func fetchAndUpdateSupplementalCachedPeerData(peerId rawPeerId: PeerId, accountP
                 |> retryRequest
                 |> mapToSignal { peerSettings -> Signal<Bool, NoError> in
                     var peers: [Peer] = []
-                    var peerPresences: [PeerId: PeerPresence] = [:]
+                    var peerPresences: [PeerId: Api.User] = [:]
                     
                     let peerStatusSettings: PeerStatusSettings
                     switch peerSettings {
@@ -93,9 +93,7 @@ func fetchAndUpdateSupplementalCachedPeerData(peerId rawPeerId: PeerId, accountP
                             for user in users {
                                 let telegramUser = TelegramUser(user: user)
                                 peers.append(telegramUser)
-                                if let presence = TelegramUserPresence(apiUser: user) {
-                                    peerPresences[telegramUser.id] = presence
-                                }
+                                peerPresences[telegramUser.id] = user
                             }
                     }
    
@@ -198,7 +196,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                         case let .userFull(fullUser, chats, users):
                             var accountUser: Api.User?
                             var peers: [Peer] = []
-                            var peerPresences: [PeerId: PeerPresence] = [:]
+                            var peerPresences: [PeerId: Api.User] = [:]
                             for chat in chats {
                                 if let peer = parseTelegramGroupOrChannel(chat: chat) {
                                     peers.append(peer)
@@ -207,16 +205,14 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                             for user in users {
                                 let telegramUser = TelegramUser(user: user)
                                 peers.append(telegramUser)
-                                if let presence = TelegramUserPresence(apiUser: user) {
-                                    peerPresences[telegramUser.id] = presence
-                                }
+                                peerPresences[telegramUser.id] = user
                                 if telegramUser.id == accountPeerId {
                                     accountUser = user
                                 }
                             }
                             
                             switch fullUser {
-                            case let .userFull(_, _, _, _, _, userFullNotifySettings, _, _, _, _, _, _, _, _, _):
+                            case let .userFull(_, _, _, _, _, _, _, userFullNotifySettings, _, _, _, _, _, _, _, _, _, _):
                                 updatePeers(transaction: transaction, peers: peers, update: { previous, updated -> Peer in
                                     if previous?.id == accountPeerId, let accountUser = accountUser, let user = TelegramUser.merge(previous as? TelegramUser, rhs: accountUser) {
                                         return user
@@ -234,28 +230,50 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                     previous = CachedUserData()
                                 }
                                 switch fullUser {
-                                    case let .userFull(userFullFlags, _, userFullAbout, userFullSettings, profilePhoto, _, userFullBotInfo, userFullPinnedMsgId, userFullCommonChatsCount, _, userFullTtlPeriod, userFullThemeEmoticon, _, _, _):
+                                    case let .userFull(userFullFlags, _, userFullAbout, userFullSettings, personalPhoto, profilePhoto, fallbackPhoto, _, userFullBotInfo, userFullPinnedMsgId, userFullCommonChatsCount, _, userFullTtlPeriod, userFullThemeEmoticon, _, _, _, userPremiumGiftOptions):
                                         let botInfo = userFullBotInfo.flatMap(BotInfo.init(apiBotInfo:))
                                         let isBlocked = (userFullFlags & (1 << 0)) != 0
                                         let voiceCallsAvailable = (userFullFlags & (1 << 4)) != 0
                                         let videoCallsAvailable = (userFullFlags & (1 << 13)) != 0
-
+                                        let voiceMessagesAvailable = (userFullFlags & (1 << 20)) == 0
+                                    
                                         let callsPrivate = (userFullFlags & (1 << 5)) != 0
                                         let canPinMessages = (userFullFlags & (1 << 7)) != 0
                                         let pinnedMessageId = userFullPinnedMsgId.flatMap({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) })
-                                        
+                                    
+
                                         let peerStatusSettings = PeerStatusSettings(apiSettings: userFullSettings)
                                         
                                         let hasScheduledMessages = (userFullFlags & 1 << 12) != 0
                                         
                                         let autoremoveTimeout: CachedPeerAutoremoveTimeout = .known(CachedPeerAutoremoveTimeout.Value(userFullTtlPeriod))
                                     
+                                        let personalPhoto = personalPhoto.flatMap { telegramMediaImageFromApiPhoto($0) }
                                         let photo = profilePhoto.flatMap { telegramMediaImageFromApiPhoto($0) }
+                                        let fallbackPhoto = fallbackPhoto.flatMap { telegramMediaImageFromApiPhoto($0) }
+                                    
+                                        let premiumGiftOptions: [CachedPremiumGiftOption]
+                                        if let userPremiumGiftOptions = userPremiumGiftOptions {
+                                            premiumGiftOptions = userPremiumGiftOptions.map { apiOption in
+                                                let option: CachedPremiumGiftOption
+                                                switch apiOption {
+                                                    case let .premiumGiftOption(_, months, currency, amount, botUrl, storeProduct):
+                                                        option = CachedPremiumGiftOption(months: months, currency: currency, amount: amount, botUrl: botUrl, storeProductId: storeProduct)
+                                                }
+                                                return option
+                                            }
+                                        } else {
+                                            premiumGiftOptions = []
+                                        }
                                     
                                         return previous.withUpdatedAbout(userFullAbout).withUpdatedBotInfo(botInfo).withUpdatedCommonGroupCount(userFullCommonChatsCount).withUpdatedIsBlocked(isBlocked).withUpdatedVoiceCallsAvailable(voiceCallsAvailable).withUpdatedVideoCallsAvailable(videoCallsAvailable).withUpdatedCallsPrivate(callsPrivate).withUpdatedCanPinMessages(canPinMessages).withUpdatedPeerStatusSettings(peerStatusSettings).withUpdatedPinnedMessageId(pinnedMessageId).withUpdatedHasScheduledMessages(hasScheduledMessages)
                                             .withUpdatedAutoremoveTimeout(autoremoveTimeout)
                                             .withUpdatedThemeEmoticon(userFullThemeEmoticon)
-                                            .withUpdatedPhoto(photo)
+                                            .withUpdatedPhoto(.known(photo))
+                                            .withUpdatedPersonalPhoto(.known(personalPhoto))
+                                            .withUpdatedFallbackPhoto(.known(fallbackPhoto))
+                                            .withUpdatedPremiumGiftOptions(premiumGiftOptions)
+                                            .withUpdatedVoiceMessagesAvailable(voiceMessagesAvailable)
                                 }
                             })
                         }
@@ -277,7 +295,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                             }
                             
                             switch fullChat {
-                            case let .chatFull(chatFullFlags, _, chatFullAbout, chatFullParticipants, chatFullChatPhoto, _, chatFullExportedInvite, chatFullBotInfo, chatFullPinnedMsgId, _, chatFullCall, _, chatFullGroupcallDefaultJoinAs, chatFullThemeEmoticon, chatFullRequestsPending, _, allowedReactions):
+                            case let .chatFull(chatFullFlags, _, chatFullAbout, chatFullParticipants, chatFullChatPhoto, _, chatFullExportedInvite, chatFullBotInfo, chatFullPinnedMsgId, _, chatFullCall, chatTtlPeriod, chatFullGroupcallDefaultJoinAs, chatFullThemeEmoticon, chatFullRequestsPending, _, allowedReactions):
                                 var botInfos: [CachedPeerBotInfo] = []
                                 for botInfo in chatFullBotInfo ?? [] {
                                     switch botInfo {
@@ -290,6 +308,9 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                     }
                                 }
                                 let participants = CachedGroupParticipants(apiParticipants: chatFullParticipants)
+                                
+                                let autoremoveTimeout: CachedPeerAutoremoveTimeout = .known(CachedPeerAutoremoveTimeout.Value(chatTtlPeriod))
+
                                 
                                 var invitedBy: PeerId?
                                 if let participants = participants {
@@ -309,7 +330,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                 let pinnedMessageId = chatFullPinnedMsgId.flatMap({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) })
                             
                                 var peers: [Peer] = []
-                                var peerPresences: [PeerId: PeerPresence] = [:]
+                                var peerPresences: [PeerId: Api.User] = [:]
                                 for chat in chats {
                                     if let groupOrChannel = parseTelegramGroupOrChannel(chat: chat) {
                                         peers.append(groupOrChannel)
@@ -318,9 +339,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                 for user in users {
                                     if let telegramUser = TelegramUser.merge(transaction.getPeer(user.peerId) as? TelegramUser, rhs: user) {
                                         peers.append(telegramUser)
-                                        if let presence = TelegramUserPresence(apiUser: user) {
-                                            peerPresences[telegramUser.id] = presence
-                                        }
+                                        peerPresences[telegramUser.id] = user
                                     }
                                 }
                                 
@@ -358,6 +377,20 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                         }
                                     }
                                     
+                                    let mappedAllowedReactions: PeerAllowedReactions
+                                    if let allowedReactions = allowedReactions {
+                                        switch allowedReactions {
+                                        case .chatReactionsAll:
+                                            mappedAllowedReactions = .all
+                                        case let .chatReactionsSome(reactions):
+                                            mappedAllowedReactions = .limited(reactions.compactMap(MessageReaction.Reaction.init(apiReaction:)))
+                                        case .chatReactionsNone:
+                                            mappedAllowedReactions = .empty
+                                        }
+                                    } else {
+                                        mappedAllowedReactions = .empty
+                                    }
+                                    
                                     return previous.withUpdatedParticipants(participants)
                                         .withUpdatedExportedInvitation(exportedInvitation)
                                         .withUpdatedBotInfos(botInfos)
@@ -371,7 +404,8 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                         .withUpdatedCallJoinPeerId(groupCallDefaultJoinAs?.peerId)
                                         .withUpdatedThemeEmoticon(chatFullThemeEmoticon)
                                         .withUpdatedInviteRequestsPending(chatFullRequestsPending)
-                                        .withUpdatedAllowedReactions(allowedReactions ?? [])
+                                        .withUpdatedAutoremoveTimeout(autoremoveTimeout)
+                                        .withUpdatedAllowedReactions(.known(mappedAllowedReactions))
                                 })
                             case .channelFull:
                                 break
@@ -432,6 +466,12 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                             if (flags2 & (1 << 0)) != 0 {
                                                 channelFlags.insert(.canDeleteHistory)
                                             }
+                                            if (flags2 & Int32(1 << 1)) != 0 {
+                                                channelFlags.insert(.antiSpamEnabled)
+                                            }
+                                            if (flags2 & Int32(1 << 3)) != 0 {
+                                                channelFlags.insert(.translationHidden)
+                                            }
                                         
                                             let sendAsPeerId = defaultSendAs?.peerId
                                             
@@ -483,7 +523,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                             }
                                             
                                             var peers: [Peer] = []
-                                            var peerPresences: [PeerId: PeerPresence] = [:]
+                                            var peerPresences: [PeerId: Api.User] = [:]
                                             for chat in chats {
                                                 if let groupOrChannel = parseTelegramGroupOrChannel(chat: chat) {
                                                     peers.append(groupOrChannel)
@@ -492,9 +532,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                             for user in users {
                                                 if let telegramUser = TelegramUser.merge(transaction.getPeer(user.peerId) as? TelegramUser, rhs: user) {
                                                     peers.append(telegramUser)
-                                                    if let presence = TelegramUserPresence(apiUser: user) {
-                                                        peerPresences[telegramUser.id] = presence
-                                                    }
+                                                    peerPresences[telegramUser.id] = user
                                                 }
                                             }
                                             
@@ -504,9 +542,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                                     for user in users {
                                                         if let telegramUser = TelegramUser.merge(transaction.getPeer(user.peerId) as? TelegramUser, rhs: user) {
                                                             peers.append(telegramUser)
-                                                            if let presence = TelegramUserPresence(apiUser: user) {
-                                                                peerPresences[telegramUser.id] = presence
-                                                            }
+                                                            peerPresences[telegramUser.id] = user
                                                         }
                                                     }
                                                     for chat in chats {
@@ -526,9 +562,11 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                             let stickerPack: StickerPackCollectionInfo? = stickerSet.flatMap { apiSet -> StickerPackCollectionInfo in
                                                 let namespace: ItemCollectionId.Namespace
                                                 switch apiSet {
-                                                    case let .stickerSet(flags, _, _, _, _, _, _, _, _, _, _):
+                                                    case let .stickerSet(flags, _, _, _, _, _, _, _, _, _, _, _):
                                                         if (flags & (1 << 3)) != 0 {
                                                             namespace = Namespaces.ItemCollection.CloudMaskPacks
+                                                        } else if (flags & (1 << 7)) != 0 {
+                                                            namespace = Namespaces.ItemCollection.CloudEmojiPacks
                                                         } else {
                                                             namespace = Namespaces.ItemCollection.CloudStickerPacks
                                                         }
@@ -582,6 +620,22 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                                     }
                                                 }
                                                 
+                                                let mappedAllowedReactions: PeerAllowedReactions
+                                                if let allowedReactions = allowedReactions {
+                                                    switch allowedReactions {
+                                                    case .chatReactionsAll:
+                                                        mappedAllowedReactions = .all
+                                                    case let .chatReactionsSome(reactions):
+                                                        mappedAllowedReactions = .limited(reactions.compactMap(MessageReaction.Reaction.init(apiReaction:)))
+                                                    case .chatReactionsNone:
+                                                        mappedAllowedReactions = .empty
+                                                    }
+                                                } else {
+                                                    mappedAllowedReactions = .empty
+                                                }
+                                                
+                                                let membersHidden = (flags2 & (1 << 2)) != 0
+                                                
                                                 return previous.withUpdatedFlags(channelFlags)
                                                     .withUpdatedAbout(about)
                                                     .withUpdatedParticipantsSummary(CachedChannelParticipantsSummary(memberCount: participantsCount, adminCount: adminsCount, bannedCount: bannedCount, kickedCount: kickedCount))
@@ -607,7 +661,8 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                                     .withUpdatedThemeEmoticon(themeEmoticon)
                                                     .withUpdatedInviteRequestsPending(requestsPending)
                                                     .withUpdatedSendAsPeerId(sendAsPeerId)
-                                                    .withUpdatedAllowedReactions(allowedReactions ?? [])
+                                                    .withUpdatedAllowedReactions(.known(mappedAllowedReactions))
+                                                    .withUpdatedMembersHidden(.known(PeerMembersHidden(value: membersHidden)))
                                             })
                                         
                                             if let minAvailableMessageId = minAvailableMessageId, minAvailableMessageIdUpdated {
@@ -616,7 +671,7 @@ func _internal_fetchAndUpdateCachedPeerData(accountPeerId: PeerId, peerId rawPee
                                                     addMessageMediaResourceIdsToRemove(media: media, resourceIds: &resourceIds)
                                                 })
                                                 if !resourceIds.isEmpty {
-                                                    let _ = postbox.mediaBox.removeCachedResources(Set(resourceIds)).start()
+                                                    let _ = postbox.mediaBox.removeCachedResources(Array(Set(resourceIds))).start()
                                                 }
                                             }
                                         case .chatFull:

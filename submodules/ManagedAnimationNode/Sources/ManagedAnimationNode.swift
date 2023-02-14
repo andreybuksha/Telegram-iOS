@@ -61,7 +61,9 @@ public final class ManagedAnimationState {
     }
     
     func draw() -> UIImage? {
-        let renderContext = DrawingContext(size: self.displaySize, scale: UIScreenScale, clear: true)
+        guard let renderContext = DrawingContext(size: self.displaySize, scale: UIScreenScale, clear: true) else {
+            return nil
+        }
 
         self.instance.renderFrame(with: Int32(self.frameIndex ?? 0), into: renderContext.bytes.assumingMemoryBound(to: UInt8.self), width: Int32(renderContext.size.width * renderContext.scale), height: Int32(renderContext.size.height * renderContext.scale), bytesPerRow: Int32(renderContext.bytesPerRow))
         return renderContext.generateImage()
@@ -143,7 +145,7 @@ open class ManagedAnimationNode: ASDisplayNode {
     public let intrinsicSize: CGSize
     
     private let imageNode: ASImageNode
-    private let displayLink: CADisplayLink
+    private let displayLink: SharedDisplayLinkDriver.Link
     
     public var imageUpdated: ((UIImage) -> Void)?
     public var image: UIImage? {
@@ -177,18 +179,13 @@ open class ManagedAnimationNode: ASDisplayNode {
         self.imageNode.frame = CGRect(origin: CGPoint(), size: self.intrinsicSize)
         
         var displayLinkUpdate: (() -> Void)?
-        self.displayLink = CADisplayLink(target: DisplayLinkTarget {
+        self.displayLink = SharedDisplayLinkDriver.shared.add {
             displayLinkUpdate?()
-        }, selector: #selector(DisplayLinkTarget.event))
-        if #available(iOS 10.0, *) {
-            self.displayLink.preferredFramesPerSecond = 60
         }
         
         super.init()
         
         self.addSubnode(self.imageNode)
-        
-        self.displayLink.add(to: RunLoop.main, forMode: .common)
         
         displayLinkUpdate = { [weak self] in
             self?.updateAnimation()
@@ -197,6 +194,7 @@ open class ManagedAnimationNode: ASDisplayNode {
     
     open func advanceState() {
         guard !self.trackStack.isEmpty else {
+            self.displayLink.isPaused = true
             return
         }
         
@@ -209,6 +207,7 @@ open class ManagedAnimationNode: ASDisplayNode {
         }
         
         self.didTryAdvancingState = false
+        self.displayLink.isPaused = false
     }
     
     public func updateAnimation() {
@@ -217,6 +216,7 @@ open class ManagedAnimationNode: ASDisplayNode {
         }
         
         guard let state = self.state else {
+            self.displayLink.isPaused = true
             return
         }
         
@@ -294,7 +294,10 @@ open class ManagedAnimationNode: ASDisplayNode {
         }
     }
     
-    public func trackTo(item: ManagedAnimationItem) {
+    public func trackTo(item: ManagedAnimationItem, immediately: Bool = false) {
+        if immediately {
+            self.trackStack.removeAll()
+        }
         self.trackStack.append(item)
         self.didTryAdvancingState = false
         self.updateAnimation()

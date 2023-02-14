@@ -11,6 +11,7 @@ import AccountContext
 import LocalizedPeerData
 import ItemListUI
 import ChatPresentationInterfaceState
+import ChatControllerInteraction
 
 private struct MentionChatInputContextPanelEntry: Comparable, Identifiable {
     let index: Int
@@ -67,7 +68,7 @@ final class MentionChatInputContextPanelNode: ChatInputContextPanelNode {
     private var enqueuedTransitions: [(CommandChatInputContextPanelTransition, Bool)] = []
     private var validLayout: (CGSize, CGFloat, CGFloat, CGFloat)?
     
-    init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize, mode: MentionChatInputContextPanelMode) {
+    init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize, mode: MentionChatInputContextPanelMode, chatPresentationContext: ChatPresentationContext) {
         self.mode = mode
         
         self.listView = ListView()
@@ -80,7 +81,7 @@ final class MentionChatInputContextPanelNode: ChatInputContextPanelNode {
             return strings.VoiceOver_ScrollStatus(row, count).string
         }
         
-        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize)
+        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize, chatPresentationContext: chatPresentationContext)
         
         self.isOpaque = false
         self.clipsToBounds = true

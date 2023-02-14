@@ -37,6 +37,9 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
     var interactivelyDismissed: (() -> Void)?
     var controllerRemoved: ((ViewController) -> Void)?
     
+    var shouldCancelPanGesture: (() -> Bool)?
+    var requestDismiss: (() -> Void)?
+    
     var updateModalProgress: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     
     private var isUpdatingState = false
@@ -72,7 +75,7 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
         self.clipNode = ASDisplayNode()
         
         var controllerRemovedImpl: ((ViewController) -> Void)?
-        self.container = NavigationContainer(controllerRemoved: { c in
+        self.container = NavigationContainer(isFlat: false, controllerRemoved: { c in
             controllerRemovedImpl?(c)
         })
         self.container.clipsToBounds = true
@@ -133,9 +136,15 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
     }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer is UIPanGestureRecognizer {
+        if let panGestureRecognizer = gestureRecognizer as? UIPanGestureRecognizer, otherGestureRecognizer is UIPanGestureRecognizer {
             if let _ = otherGestureRecognizer.view?.superview as? MKMapView {
                 return false
+            }
+            if let view = otherGestureRecognizer.view, view.description.contains("WKChildScroll") {
+                let velocity = panGestureRecognizer.velocity(in: nil)
+                if abs(velocity.x) > abs(velocity.y) * 2.0 {
+                    return false
+                }
             }
             if let _ = otherGestureRecognizer.view?.asyncdisplaykit_node as? CollectionIndexNode {
                 return false
@@ -232,6 +241,12 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
                     }
                 }
             
+                if !self.isExpanded, translation > 40.0, let shouldCancelPanGesture = self.shouldCancelPanGesture, shouldCancelPanGesture() {
+                    self.cancelPanGesture()
+                    self.requestDismiss?()
+                    return
+                }
+            
                 var bounds = self.bounds
                 if self.isExpanded {
                     bounds.origin.y = -max(0.0, translation - edgeTopInset)
@@ -277,8 +292,13 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
                 let offset = currentTopInset + panOffset
                 let topInset: CGFloat = edgeTopInset
             
+                var ignoreDismiss = false
+                if let shouldCancelPanGesture = self.shouldCancelPanGesture, shouldCancelPanGesture() {
+                    ignoreDismiss = true
+                }
+            
                 var dismissing = false
-                if bounds.minY < -60 || (bounds.minY < 0.0 && velocity.y > 300.0) || (self.isExpanded && bounds.minY.isZero && velocity.y > 1800.0) {
+                if (bounds.minY < -60 || (bounds.minY < 0.0 && velocity.y > 300.0) || (self.isExpanded && bounds.minY.isZero && velocity.y > 1800.0)) && !ignoreDismiss {
                     self.interactivelyDismissed?()
                     dismissing = true
                 } else if self.isExpanded {
@@ -340,6 +360,12 @@ final class AttachmentContainer: ASDisplayNode, UIGestureRecognizerDelegate {
                 
                 self.isAnimating = true
                 self.update(layout: layout, controllers: controllers, coveredByModalTransition: coveredByModalTransition, transition: .animated(duration: 0.3, curve: .easeInOut), completion: completion)
+              
+                var bounds = self.bounds
+                let previousBounds = bounds
+                bounds.origin.y = 0.0
+                self.bounds = bounds
+                self.layer.animateBounds(from: previousBounds, to: self.bounds, duration: 0.3, timingFunction: CAMediaTimingFunctionName.easeInEaseOut.rawValue)
             default:
                 break
         }

@@ -18,13 +18,14 @@ import TelegramUniversalVideoContent
 import GalleryUI
 import WallpaperBackgroundNode
 import InvisibleInkDustNode
+import TextNodeWithEntities
 
-private func attributedServiceMessageString(theme: ChatPresentationThemeData, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, message: Message, accountPeerId: PeerId) -> NSAttributedString? {
-    return universalServiceMessageString(presentationData: (theme.theme, theme.wallpaper), strings: strings, nameDisplayOrder: nameDisplayOrder, dateTimeFormat: dateTimeFormat, message: EngineMessage(message), accountPeerId: accountPeerId, forChatList: false)
+private func attributedServiceMessageString(theme: ChatPresentationThemeData, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, message: Message, accountPeerId: PeerId, forForumOverview: Bool) -> NSAttributedString? {
+    return universalServiceMessageString(presentationData: (theme.theme, theme.wallpaper), strings: strings, nameDisplayOrder: nameDisplayOrder, dateTimeFormat: dateTimeFormat, message: EngineMessage(message), accountPeerId: accountPeerId, forChatList: false, forForumOverview: forForumOverview)
 }
 
 class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
-    let labelNode: TextNode
+    let labelNode: TextNodeWithEntities
     private var dustNode: InvisibleInkDustNode?
     var backgroundNode: WallpaperBubbleBackgroundNode?
     var backgroundColorNode: ASDisplayNode
@@ -41,10 +42,28 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
     private var cachedMaskBackgroundImage: (CGPoint, UIImage, [CGRect])?
     private var absoluteRect: (CGRect, CGSize)?
     
+    override var visibility: ListViewItemNodeVisibility {
+        didSet {
+            if oldValue != self.visibility {
+                switch self.visibility {
+                case .none:
+                    self.labelNode.visibilityRect = nil
+                    //self.spoilerTextNode?.visibilityRect = nil
+                case let .visible(_, subRect):
+                    var subRect = subRect
+                    subRect.origin.x = 0.0
+                    subRect.size.width = 10000.0
+                    self.labelNode.visibilityRect = subRect
+                    //self.spoilerTextNode?.visibilityRect = subRect
+                }
+            }
+        }
+    }
+    
     required init() {
-        self.labelNode = TextNode()
-        self.labelNode.isUserInteractionEnabled = false
-        self.labelNode.displaysAsynchronously = false
+        self.labelNode = TextNodeWithEntities()
+        self.labelNode.textNode.isUserInteractionEnabled = false
+        self.labelNode.textNode.displaysAsynchronously = false
 
         self.backgroundColorNode = ASDisplayNode()
         self.backgroundMaskNode = ASImageNode()
@@ -55,7 +74,7 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
         
         super.init()
 
-        self.addSubnode(self.labelNode)
+        self.addSubnode(self.labelNode.textNode)
     }
     
     required init?(coder aDecoder: NSCoder) {
@@ -129,18 +148,23 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
         return mediaHidden
     }
     
-    override func asyncLayoutContent() -> (_ item: ChatMessageBubbleContentItem, _ layoutConstants: ChatMessageItemLayoutConstants, _ preparePosition: ChatMessageBubblePreparePosition, _ messageSelection: Bool?, _ constrainedSize: CGSize) -> (ChatMessageBubbleContentProperties, unboundSize: CGSize?, maxWidth: CGFloat, layout: (CGSize, ChatMessageBubbleContentPosition) -> (CGFloat, (CGFloat) -> (CGSize, (ListViewItemUpdateAnimation, Bool, ListViewItemApply?) -> Void))) {
-        let makeLabelLayout = TextNode.asyncLayout(self.labelNode)
+    override func asyncLayoutContent() -> (_ item: ChatMessageBubbleContentItem, _ layoutConstants: ChatMessageItemLayoutConstants, _ preparePosition: ChatMessageBubblePreparePosition, _ messageSelection: Bool?, _ constrainedSize: CGSize, _ avatarInset: CGFloat) -> (ChatMessageBubbleContentProperties, unboundSize: CGSize?, maxWidth: CGFloat, layout: (CGSize, ChatMessageBubbleContentPosition) -> (CGFloat, (CGFloat) -> (CGSize, (ListViewItemUpdateAnimation, Bool, ListViewItemApply?) -> Void))) {
+        let makeLabelLayout = TextNodeWithEntities.asyncLayout(self.labelNode)
 
         let cachedMaskBackgroundImage = self.cachedMaskBackgroundImage
         
-        return { item, layoutConstants, _, _, _ in
+        return { item, layoutConstants, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: .always, forceFullCorners: false, forceAlignment: .center)
             
             let backgroundImage = PresentationResourcesChat.chatActionPhotoBackgroundImage(item.presentationData.theme.theme, wallpaper: !item.presentationData.theme.wallpaper.isEmpty)
             
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
-                let attributedString = attributedServiceMessageString(theme: item.presentationData.theme, strings: item.presentationData.strings, nameDisplayOrder: item.presentationData.nameDisplayOrder, dateTimeFormat: item.presentationData.dateTimeFormat, message: item.message, accountPeerId: item.context.account.peerId)
+                var forForumOverview = false
+                if item.chatLocation.threadId == nil {
+                    forForumOverview = true
+                }
+                
+                let attributedString = attributedServiceMessageString(theme: item.presentationData.theme, strings: item.presentationData.strings, nameDisplayOrder: item.presentationData.nameDisplayOrder, dateTimeFormat: item.presentationData.dateTimeFormat, message: item.message, accountPeerId: item.context.account.peerId, forForumOverview: forForumOverview)
             
                 var image: TelegramMediaImage?
                 for media in item.message.media {
@@ -184,7 +208,7 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                 if let (currentOffset, currentImage, currentRects) = cachedMaskBackgroundImage, currentRects == labelRects {
                     backgroundMaskImage = (currentOffset, currentImage)
                 } else {
-                    backgroundMaskImage = LinkHighlightingNode.generateImage(color: .black, inset: 0.0, innerRadius: 10.0, outerRadius: 10.0, rects: labelRects)
+                    backgroundMaskImage = LinkHighlightingNode.generateImage(color: .black, inset: 0.0, innerRadius: 10.0, outerRadius: 10.0, rects: labelRects, useModernPathCalculation: false)
                     backgroundMaskUpdated = true
                 }
             
@@ -215,8 +239,8 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                                     strongSelf.insertSubnode(imageNode, at: 0)
                                     strongSelf.insertSubnode(strongSelf.mediaBackgroundNode, at: 0)
                                 }
-                                strongSelf.fetchDisposable.set(chatMessagePhotoInteractiveFetched(context: item.context, photoReference: .message(message: MessageReference(item.message), media: image), displayAtSize: nil, storeToDownloadsPeerType: nil).start())
-                                let updateImageSignal = chatMessagePhoto(postbox: item.context.account.postbox, photoReference: .message(message: MessageReference(item.message), media: image), synchronousLoad: synchronousLoads)
+                                strongSelf.fetchDisposable.set(chatMessagePhotoInteractiveFetched(context: item.context, userLocation: .peer(item.message.id.peerId), photoReference: .message(message: MessageReference(item.message), media: image), displayAtSize: nil, storeToDownloadsPeerId: nil).start())
+                                let updateImageSignal = chatMessagePhoto(postbox: item.context.account.postbox, userLocation: .peer(item.message.id.peerId), photoReference: .message(message: MessageReference(item.message), media: image), synchronousLoad: synchronousLoads)
 
                                 imageNode.setSignal(updateImageSignal, attemptSynchronously: synchronousLoads)
                                 
@@ -235,7 +259,7 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                             
                             if let image = image, let video = image.videoRepresentations.last, let id = image.id?.id {
                                 let videoFileReference = FileMediaReference.message(message: MessageReference(item.message), media: TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: 0), partialReference: nil, resource: video.resource, previewRepresentations: image.representations, videoThumbnails: [], immediateThumbnailData: image.immediateThumbnailData, mimeType: "video/mp4", size: nil, attributes: [.Animated, .Video(duration: 0, size: video.dimensions, flags: [])]))
-                                let videoContent = NativeVideoContent(id: .profileVideo(id, "action"), fileReference: videoFileReference, streamVideo: isMediaStreamable(resource: video.resource) ? .conservative : .none, loopVideo: true, enableSound: false, fetchAutomatically: true, onlyFullSizeThumbnail: false, useLargeThumbnail: true, autoFetchFullSizeThumbnail: true, continuePlayingWithoutSoundOnLostAudioSession: false, placeholderColor: .clear)
+                                let videoContent = NativeVideoContent(id: .profileVideo(id, "action"), userLocation: .peer(item.message.id.peerId), fileReference: videoFileReference, streamVideo: isMediaStreamable(resource: video.resource) ? .conservative : .none, loopVideo: true, enableSound: false, fetchAutomatically: true, onlyFullSizeThumbnail: false, useLargeThumbnail: true, autoFetchFullSizeThumbnail: true, continuePlayingWithoutSoundOnLostAudioSession: false, placeholderColor: .clear, storeAfterDownload: nil)
                                 if videoContent.id != strongSelf.videoContent?.id {
                                     let mediaManager = item.context.sharedContext.mediaManager
                                     let videoNode = UniversalVideoNode(postbox: item.context.account.postbox, audioSession: mediaManager.audioSession, manager: mediaManager.universalVideoManager, decoration: GalleryVideoDecoration(), content: videoContent, priority: .secondaryOverlay)
@@ -273,10 +297,16 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                                 videoNode.removeFromSupernode()
                             }
                                                         
-                            let _ = apply()
+                            let _ = apply(TextNodeWithEntities.Arguments(
+                                context: item.context,
+                                cache: item.controllerInteraction.presentationContext.animationCache,
+                                renderer: item.controllerInteraction.presentationContext.animationRenderer,
+                                placeholderColor: item.presentationData.theme.theme.chat.message.freeform.withWallpaper.reactionInactiveBackground,
+                                attemptSynchronous: synchronousLoads
+                            ))
                             
                             let labelFrame = CGRect(origin: CGPoint(x: 8.0, y: image != nil ? 2 : floorToScreenPixels((backgroundSize.height - labelLayout.size.height) / 2.0) - 1.0), size: labelLayout.size)
-                            strongSelf.labelNode.frame = labelFrame
+                            strongSelf.labelNode.textNode.frame = labelFrame
                             strongSelf.backgroundColorNode.backgroundColor = selectDateFillStaticColor(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper)
 
                             if !labelLayout.spoilers.isEmpty {
@@ -289,7 +319,7 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                                     dustNode = InvisibleInkDustNode(textNode: nil)
                                     dustNode.isUserInteractionEnabled = false
                                     strongSelf.dustNode = dustNode
-                                    strongSelf.insertSubnode(dustNode, aboveSubnode: strongSelf.labelNode)
+                                    strongSelf.insertSubnode(dustNode, aboveSubnode: strongSelf.labelNode.textNode)
                                 }
                                 dustNode.frame = labelFrame.insetBy(dx: -3.0, dy: -3.0).offsetBy(dx: 0.0, dy: 1.0)
                                 dustNode.update(size: dustNode.frame.size, color: dustColor, textColor: dustColor, rects: labelLayout.spoilers.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 1.0, dy: 1.0) }, wordRects: labelLayout.spoilerWords.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 1.0, dy: 1.0) })
@@ -307,6 +337,12 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                                         backgroundNode.addSubnode(strongSelf.backgroundColorNode)
                                         strongSelf.insertSubnode(backgroundNode, at: 0)
                                     }
+                                }
+                                
+                                if item.controllerInteraction.presentationContext.backgroundNode?.hasExtraBubbleBackground() == true {
+                                    strongSelf.backgroundColorNode.isHidden = true
+                                } else {
+                                    strongSelf.backgroundColorNode.isHidden = false
                                 }
 
                                 if backgroundMaskUpdated, let backgroundNode = strongSelf.backgroundNode {
@@ -333,6 +369,18 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                                 strongSelf.backgroundColorNode.frame = CGRect(origin: CGPoint(), size: image.size)
 
                                 strongSelf.cachedMaskBackgroundImage = (offset, image, labelRects)
+                                
+                                switch strongSelf.visibility {
+                                case .none:
+                                    strongSelf.labelNode.visibilityRect = nil
+                                    //strongSelf.spoilerTextNode?.visibilityRect = nil
+                                case let .visible(_, subRect):
+                                    var subRect = subRect
+                                    subRect.origin.x = 0.0
+                                    subRect.size.width = 10000.0
+                                    strongSelf.labelNode.visibilityRect = subRect
+                                    //strongSelf.spoilerTextNode?.visibilityRect = subRect
+                                }
                             }
                         }
                     })
@@ -367,9 +415,9 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
     override func updateTouchesAtPoint(_ point: CGPoint?) {
         if let item = self.item {
             var rects: [(CGRect, CGRect)]?
-            let textNodeFrame = self.labelNode.frame
+            let textNodeFrame = self.labelNode.textNode.frame
             if let point = point {
-                if let (index, attributes) = self.labelNode.attributesAtPoint(CGPoint(x: point.x - textNodeFrame.minX, y: point.y - textNodeFrame.minY - 10.0)) {
+                if let (index, attributes) = self.labelNode.textNode.attributesAtPoint(CGPoint(x: point.x - textNodeFrame.minX, y: point.y - textNodeFrame.minY - 10.0)) {
                     let possibleNames: [String] = [
                         TelegramTextAttributes.URL,
                         TelegramTextAttributes.PeerMention,
@@ -379,7 +427,7 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                     ]
                     for name in possibleNames {
                         if let _ = attributes[NSAttributedString.Key(rawValue: name)] {
-                            rects = self.labelNode.lineAndAttributeRects(name: name, at: index)
+                            rects = self.labelNode.textNode.lineAndAttributeRects(name: name, at: index)
                             break
                         }
                     }
@@ -401,11 +449,12 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
                 } else {
                     let serviceColor = serviceMessageColorComponents(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper)
                     linkHighlightingNode = LinkHighlightingNode(color: serviceColor.linkHighlight)
+                    linkHighlightingNode.useModernPathCalculation = false
                     linkHighlightingNode.inset = 2.5
                     self.linkHighlightingNode = linkHighlightingNode
-                    self.insertSubnode(linkHighlightingNode, belowSubnode: self.labelNode)
+                    self.insertSubnode(linkHighlightingNode, belowSubnode: self.labelNode.textNode)
                 }
-                linkHighlightingNode.frame = self.labelNode.frame.offsetBy(dx: 0.0, dy: 1.5)
+                linkHighlightingNode.frame = self.labelNode.textNode.frame.offsetBy(dx: 0.0, dy: 1.5)
                 linkHighlightingNode.updateRects(mappedRects)
             } else if let linkHighlightingNode = self.linkHighlightingNode {
                 self.linkHighlightingNode = nil
@@ -417,11 +466,11 @@ class ChatMessageActionBubbleContentNode: ChatMessageBubbleContentNode {
     }
 
     override func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
-        let textNodeFrame = self.labelNode.frame
-        if let (index, attributes) = self.labelNode.attributesAtPoint(CGPoint(x: point.x - textNodeFrame.minX, y: point.y - textNodeFrame.minY - 10.0)), gesture == .tap {
+        let textNodeFrame = self.labelNode.textNode.frame
+        if let (index, attributes) = self.labelNode.textNode.attributesAtPoint(CGPoint(x: point.x - textNodeFrame.minX, y: point.y - textNodeFrame.minY - 10.0)), gesture == .tap {
             if let url = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)] as? String {
                 var concealed = true
-                if let (attributeText, fullText) = self.labelNode.attributeSubstring(name: TelegramTextAttributes.URL, index: index) {
+                if let (attributeText, fullText) = self.labelNode.textNode.attributeSubstring(name: TelegramTextAttributes.URL, index: index) {
                     concealed = !doesUrlMatchText(url: url, text: attributeText, fullText: fullText)
                 }
                 return .url(url: url, concealed: concealed)

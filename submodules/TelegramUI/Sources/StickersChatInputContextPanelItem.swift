@@ -126,7 +126,7 @@ final class StickersChatInputContextPanelItemNode: ListViewItemNode {
         for i in 0 ..< self.nodes.count {
             if self.nodes[i].frame.contains(location) {
                 let file = item.files[i]
-                let _ = item.interfaceInteraction.sendSticker(.standalone(media: file), true, self.nodes[i], self.nodes[i].bounds)
+                let _ = item.interfaceInteraction.sendSticker(.standalone(media: file), true, self.nodes[i].view, self.nodes[i].bounds, nil, [])
                 break
             }
         }
@@ -162,7 +162,7 @@ final class StickersChatInputContextPanelItemNode: ListViewItemNode {
         
         var previewingIndex: Int? = nil
         for i in 0 ..< item.files.count {
-            if item.stickersInteraction.previewedStickerItem == self.stickerItem(at: i) {
+            if item.stickersInteraction.previewedStickerItem?.fileId == self.stickerItem(at: i)?.file.fileId {
                 previewingIndex = i
                 break
             }
@@ -219,8 +219,8 @@ final class StickersChatInputContextPanelItemNode: ListViewItemNode {
                             strongSelf.addSubnode(imageNode)
                         }
                         
-                        imageNode.setSignal(chatMessageSticker(account: item.account, file: file, small: true))
-                        strongSelf.disposables.add(freeMediaFileResourceInteractiveFetched(account: item.account, fileReference: stickerPackFileReference(file), resource: chatMessageStickerResource(file: file, small: true)).start())
+                        imageNode.setSignal(chatMessageSticker(account: item.account, userLocation: .other, file: file, small: true))
+                        strongSelf.disposables.add(freeMediaFileResourceInteractiveFetched(account: item.account, userLocation: .other, fileReference: stickerPackFileReference(file), resource: chatMessageStickerResource(file: file, small: true)).start())
                         
                         var imageSize = itemSize
                         if let dimensions = file.dimensions {

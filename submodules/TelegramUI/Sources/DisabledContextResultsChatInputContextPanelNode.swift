@@ -8,6 +8,7 @@ import TelegramStringFormatting
 import TelegramUIPreferences
 import AccountContext
 import ChatPresentationInterfaceState
+import ChatControllerInteraction
 
 final class DisabledContextResultsChatInputContextPanelNode: ChatInputContextPanelNode {
     private let containerNode: ASDisplayNode
@@ -16,14 +17,14 @@ final class DisabledContextResultsChatInputContextPanelNode: ChatInputContextPan
     
     private var validLayout: (CGSize, CGFloat, CGFloat, CGFloat)?
     
-    override init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize) {
+    override init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize, chatPresentationContext: ChatPresentationContext) {
         self.containerNode = ASDisplayNode()
         self.separatorNode = ASDisplayNode()
         self.textNode = ImmediateTextNode()
         self.textNode.maximumNumberOfLines = 0
         self.textNode.textAlignment = .center
         
-        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize)
+        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize, chatPresentationContext: chatPresentationContext)
         
         self.isOpaque = false
         self.clipsToBounds = true

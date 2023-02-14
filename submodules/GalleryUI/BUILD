@@ -40,7 +40,11 @@ swift_library(
         "//submodules/UndoUI:UndoUI",
         "//submodules/InvisibleInkDustNode:InvisibleInkDustNode",
         "//submodules/TranslateUI:TranslateUI",
+        "//submodules/ShimmerEffect:ShimmerEffect",
         "//submodules/Utils/RangeSet:RangeSet",
+        "//submodules/TelegramUI/Components/TextNodeWithEntities:TextNodeWithEntities",
+        "//submodules/TelegramUI/Components/AnimationCache:AnimationCache",
+        "//submodules/TelegramUI/Components/MultiAnimationRenderer:MultiAnimationRenderer",
     ],
     visibility = [
         "//visibility:public",

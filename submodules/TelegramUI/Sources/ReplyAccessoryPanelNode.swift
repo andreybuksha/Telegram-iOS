@@ -14,6 +14,9 @@ import TelegramStringFormatting
 import InvisibleInkDustNode
 import TextFormat
 import ChatPresentationInterfaceState
+import TextNodeWithEntities
+import AnimationCache
+import MultiAnimationRenderer
 
 final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     private let messageDisposable = MetaDisposable()
@@ -25,7 +28,7 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     let lineNode: ASImageNode
     let iconNode: ASImageNode
     let titleNode: ImmediateTextNode
-    let textNode: ImmediateTextNode
+    let textNode: ImmediateTextNodeWithEntities
     var dustNode: InvisibleInkDustNode?
     let imageNode: TransformImageNode
     
@@ -36,7 +39,7 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     
     private var validLayout: (size: CGSize, inset: CGFloat, interfaceState: ChatPresentationInterfaceState)?
     
-    init(context: AccountContext, messageId: MessageId, theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat) {
+    init(context: AccountContext, messageId: MessageId, theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, animationCache: AnimationCache?, animationRenderer: MultiAnimationRenderer?) {
         self.messageId = messageId
         
         self.theme = theme
@@ -63,10 +66,21 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         self.titleNode.displaysAsynchronously = false
         self.titleNode.insets = UIEdgeInsets(top: 3.0, left: 0.0, bottom: 3.0, right: 0.0)
         
-        self.textNode = ImmediateTextNode()
+        self.textNode = ImmediateTextNodeWithEntities()
         self.textNode.maximumNumberOfLines = 1
         self.textNode.displaysAsynchronously = false
         self.textNode.insets = UIEdgeInsets(top: 3.0, left: 0.0, bottom: 3.0, right: 0.0)
+        self.textNode.visibility = true
+        
+        if let animationCache = animationCache, let animationRenderer = animationRenderer {
+            self.textNode.arguments = TextNodeWithEntities.Arguments(
+                context: context,
+                cache: animationCache,
+                renderer: animationRenderer,
+                placeholderColor: theme.list.mediaPlaceholderColor,
+                attemptSynchronous: false
+            )
+        }
         
         self.imageNode = TransformImageNode()
         self.imageNode.contentAnimations = [.subsequentUpdates]
@@ -119,7 +133,9 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                         default:
                             isMedia = true
                     }
-                    (text, _, isText) = descriptionStringForMessage(contentSettings: context.currentContentSettings.with { $0 }, message: EngineMessage(message), strings: strings, nameDisplayOrder: nameDisplayOrder, dateTimeFormat: dateTimeFormat, accountPeerId: context.account.peerId)
+                    let (attributedText, _, isTextValue) = descriptionStringForMessage(contentSettings: context.currentContentSettings.with { $0 }, message: EngineMessage(message), strings: strings, nameDisplayOrder: nameDisplayOrder, dateTimeFormat: dateTimeFormat, accountPeerId: context.account.peerId)
+                    text = attributedText.string
+                    isText = isTextValue
                 } else {
                     isMedia = false
                 }
@@ -128,15 +144,16 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                 let messageText: NSAttributedString
                 if isText, let message = message {
                     let entities = (message.textEntitiesAttribute?.entities ?? []).filter { entity in
-                        if case .Spoiler = entity.type {
+                        switch entity.type {
+                        case .Spoiler, .CustomEmoji:
                             return true
-                        } else {
+                        default:
                             return false
                         }
                     }
                     let textColor = strongSelf.theme.chat.inputPanel.primaryTextColor
                     if entities.count > 0 {
-                        messageText = stringWithAppliedEntities(trimToLineCount(message.text, lineCount: 1), entities: entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont,  underlineLinks: false)
+                        messageText = stringWithAppliedEntities(trimToLineCount(message.text, lineCount: 1), entities: entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont,  underlineLinks: false, message: message)
                     } else {
                         messageText = NSAttributedString(string: text, font: textFont, textColor: isMedia ? strongSelf.theme.chat.inputPanel.secondaryTextColor : strongSelf.theme.chat.inputPanel.primaryTextColor)
                     }
@@ -188,16 +205,18 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                 }
                 strongSelf.previousMediaReference = updatedMediaReference
                 
+                let hasSpoiler = message?.attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) ?? false
+                
                 var updateImageSignal: Signal<(TransformImageArguments) -> DrawingContext?, NoError>?
                 if mediaUpdated {
                     if let updatedMediaReference = updatedMediaReference, imageDimensions != nil {
                         if let imageReference = updatedMediaReference.concrete(TelegramMediaImage.self) {
-                            updateImageSignal = chatMessagePhotoThumbnail(account: context.account, photoReference: imageReference)
+                            updateImageSignal = chatMessagePhotoThumbnail(account: context.account, userLocation: (message?.id.peerId).flatMap(MediaResourceUserLocation.peer) ?? .other, photoReference: imageReference, blurred: hasSpoiler)
                         } else if let fileReference = updatedMediaReference.concrete(TelegramMediaFile.self) {
                             if fileReference.media.isVideo {
-                                updateImageSignal = chatMessageVideoThumbnail(account: context.account, fileReference: fileReference)
+                                updateImageSignal = chatMessageVideoThumbnail(account: context.account, userLocation: (message?.id.peerId).flatMap(MediaResourceUserLocation.peer) ?? .other, fileReference: fileReference, blurred: hasSpoiler)
                             } else if let iconImageRepresentation = smallestImageRepresentation(fileReference.media.previewRepresentations) {
-                                updateImageSignal = chatWebpageSnippetFile(account: context.account, mediaReference: fileReference.abstract, representation: iconImageRepresentation)
+                                updateImageSignal = chatWebpageSnippetFile(account: context.account, userLocation: (message?.id.peerId).flatMap(MediaResourceUserLocation.peer) ?? .other, mediaReference: fileReference.abstract, representation: iconImageRepresentation)
                             }
                         }
                     } else {
@@ -285,7 +304,7 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         self.validLayout = (size, inset, interfaceState)
         
         let bounds = CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: 45.0))
-        let leftInset: CGFloat = 55.0
+        let leftInset: CGFloat = 55.0 + inset
         let textLineInset: CGFloat = 10.0
         let rightInset: CGFloat = 55.0
         let textRightInset: CGFloat = 20.0
@@ -328,7 +347,6 @@ final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                 let dustNode = InvisibleInkDustNode(textNode: nil)
                 self.dustNode = dustNode
                 self.textNode.supernode?.insertSubnode(dustNode, aboveSubnode: self.textNode)
-                
             }
             if let dustNode = self.dustNode {
                 dustNode.update(size: textFrame.size, color: self.theme.chat.inputPanel.secondaryTextColor, textColor: self.theme.chat.inputPanel.primaryTextColor, rects: textLayout.spoilers.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 1.0, dy: 1.0) }, wordRects: textLayout.spoilerWords.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 1.0, dy: 1.0) })

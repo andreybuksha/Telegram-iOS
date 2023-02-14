@@ -941,7 +941,11 @@ private final class LimitSheetContent: CombinedComponent {
             
                 contentSize = CGSize(width: context.availableSize.width, height: buttonFrame.maxY + 5.0 + environment.safeInsets.bottom)
             } else {
-                contentSize = CGSize(width: context.availableSize.width, height: 351.0 + environment.safeInsets.bottom)
+                var height: CGFloat = 351.0
+                if isPremiumDisabled {
+                    height -= 78.0
+                }
+                contentSize = CGSize(width: context.availableSize.width, height: height + environment.safeInsets.bottom)
             }
             
             return contentSize
@@ -999,13 +1003,16 @@ private final class LimitSheetComponent: CombinedComponent {
                             })
                         }
                     )),
-                    backgroundColor: environment.theme.actionSheet.opaqueItemBackgroundColor,
+                    backgroundColor: .color(environment.theme.actionSheet.opaqueItemBackgroundColor),
                     animateOut: animateOut
                 ),
                 environment: {
                     environment
                     SheetComponentEnvironment(
                         isDisplaying: environment.value.isVisible,
+                        isCentered: environment.metrics.widthClass == .regular,
+                        hasInputHeight: !environment.inputHeight.isZero,
+                        regularMetricsSize: nil,
                         dismiss: { animated in
                             if animated {
                                 animateOut.invoke(Action { _ in

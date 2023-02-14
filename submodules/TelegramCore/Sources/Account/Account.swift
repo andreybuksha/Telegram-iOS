@@ -52,6 +52,19 @@ private func makeExclusiveKeychain(id: AccountRecordId, postbox: Postbox) -> Key
     })
 }
 
+func _internal_test(_ network: Network) -> Signal<Bool, String> {
+    return network.request(Api.functions.help.test()) |> map { result in
+        switch result {
+        case .boolFalse:
+            return false
+        case .boolTrue:
+            return true
+        }
+    } |> mapError { error in
+        return error.description
+    }
+}
+
 public class UnauthorizedAccount {
     public let networkArguments: NetworkInitializationArguments
     public let id: AccountRecordId
@@ -196,7 +209,7 @@ public func accountWithId(accountManager: AccountManager<TelegramAccountManagerT
                     return postbox.transaction { transaction -> (PostboxCoding?, LocalizationSettings?, ProxySettings?, NetworkSettings?) in
                         var state = transaction.getState()
                         if state == nil, let backupData = backupData {
-                            let backupState = AuthorizedAccountState(isTestingEnvironment: beginWithTestingEnvironment, masterDatacenterId: backupData.masterDatacenterId, peerId: PeerId(backupData.peerId), state: nil)
+                            let backupState = AuthorizedAccountState(isTestingEnvironment: beginWithTestingEnvironment, masterDatacenterId: backupData.masterDatacenterId, peerId: PeerId(backupData.peerId), state: nil, invalidatedChannels: [])
                             state = backupState
                             let dict = NSMutableDictionary()
                             dict.setObject(MTDatacenterAuthInfo(authKey: backupData.masterDatacenterKey, authKeyId: backupData.masterDatacenterKeyId, saltSet: [], authKeyAttributes: [:])!, forKey: backupData.masterDatacenterId as NSNumber)
@@ -321,13 +334,14 @@ public struct TwoStepAuthData {
     public let secretRandom: Data
     public let nextSecurePasswordDerivation: TwoStepSecurePasswordDerivation
     public let pendingResetTimestamp: Int32?
+    public let loginEmailPattern: String?
 }
 
 func _internal_twoStepAuthData(_ network: Network) -> Signal<TwoStepAuthData, MTRpcError> {
     return network.request(Api.functions.account.getPassword())
     |> map { config -> TwoStepAuthData in
         switch config {
-            case let .password(flags, currentAlgo, srpB, srpId, hint, emailUnconfirmedPattern, newAlgo, newSecureAlgo, secureRandom, pendingResetDate):
+            case let .password(flags, currentAlgo, srpB, srpId, hint, emailUnconfirmedPattern, newAlgo, newSecureAlgo, secureRandom, pendingResetDate, loginEmailPattern):
                 let hasRecovery = (flags & (1 << 0)) != 0
                 let hasSecureValues = (flags & (1 << 1)) != 0
                 
@@ -349,7 +363,7 @@ func _internal_twoStepAuthData(_ network: Network) -> Signal<TwoStepAuthData, MT
                     srpSessionData = TwoStepSRPSessionData(id: srpId, B: srpB.makeData())
                 }
                 
-                return TwoStepAuthData(nextPasswordDerivation: nextDerivation, currentPasswordDerivation: currentDerivation, srpSessionData: srpSessionData, hasRecovery: hasRecovery, hasSecretValues: hasSecureValues, currentHint: hint, unconfirmedEmailPattern: emailUnconfirmedPattern, secretRandom: secureRandom.makeData(), nextSecurePasswordDerivation: nextSecureDerivation, pendingResetTimestamp: pendingResetDate)
+                return TwoStepAuthData(nextPasswordDerivation: nextDerivation, currentPasswordDerivation: currentDerivation, srpSessionData: srpSessionData, hasRecovery: hasRecovery, hasSecretValues: hasSecureValues, currentHint: hint, unconfirmedEmailPattern: emailUnconfirmedPattern, secretRandom: secureRandom.makeData(), nextSecurePasswordDerivation: nextSecureDerivation, pendingResetTimestamp: pendingResetDate, loginEmailPattern: loginEmailPattern)
         }
     }
 }
@@ -664,11 +678,13 @@ public final class AccountAuxiliaryMethods {
     public let fetchResource: (Account, MediaResource, Signal<[(Range<Int64>, MediaBoxFetchPriority)], NoError>, MediaResourceFetchParameters?) -> Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError>?
     public let fetchResourceMediaReferenceHash: (MediaResource) -> Signal<Data?, NoError>
     public let prepareSecretThumbnailData: (MediaResourceData) -> (PixelDimensions, Data)?
+    public let backgroundUpload: (Postbox, Network, MediaResource) -> Signal<String?, NoError>
     
-    public init(fetchResource: @escaping (Account, MediaResource, Signal<[(Range<Int64>, MediaBoxFetchPriority)], NoError>, MediaResourceFetchParameters?) -> Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError>?, fetchResourceMediaReferenceHash: @escaping (MediaResource) -> Signal<Data?, NoError>, prepareSecretThumbnailData: @escaping (MediaResourceData) -> (PixelDimensions, Data)?) {
+    public init(fetchResource: @escaping (Account, MediaResource, Signal<[(Range<Int64>, MediaBoxFetchPriority)], NoError>, MediaResourceFetchParameters?) -> Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError>?, fetchResourceMediaReferenceHash: @escaping (MediaResource) -> Signal<Data?, NoError>, prepareSecretThumbnailData: @escaping (MediaResourceData) -> (PixelDimensions, Data)?, backgroundUpload: @escaping (Postbox, Network, MediaResource) -> Signal<String?, NoError>) {
         self.fetchResource = fetchResource
         self.fetchResourceMediaReferenceHash = fetchResourceMediaReferenceHash
         self.prepareSecretThumbnailData = prepareSecretThumbnailData
+        self.backgroundUpload = backgroundUpload
     }
 }
 
@@ -875,6 +891,7 @@ public class Account {
     
     private let serviceQueue = Queue()
     
+    private let accountManager: AccountManager<TelegramAccountManagerTypes>
     public private(set) var stateManager: AccountStateManager!
     private(set) var contactSyncManager: ContactSyncManager!
     public private(set) var callSessionManager: CallSessionManager!
@@ -892,7 +909,9 @@ public class Account {
     private let becomeMasterDisposable = MetaDisposable()
     private let managedServiceViewsDisposable = MetaDisposable()
     private let managedOperationsDisposable = DisposableSet()
+    private let managedTopReactionsDisposable = MetaDisposable()
     private var storageSettingsDisposable: Disposable?
+    private var automaticCacheEvictionContext: AutomaticCacheEvictionContext?
     
     public let importableContacts = Promise<[DeviceContactNormalizedPhoneNumber: ImportableDeviceContactData]>()
     
@@ -935,6 +954,7 @@ public class Account {
     private let smallLogPostDisposable = MetaDisposable()
     
     public init(accountManager: AccountManager<TelegramAccountManagerTypes>, id: AccountRecordId, basePath: String, testingEnvironment: Bool, postbox: Postbox, network: Network, networkArguments: NetworkInitializationArguments, peerId: PeerId, auxiliaryMethods: AccountAuxiliaryMethods, supplementary: Bool) {
+        self.accountManager = accountManager
         self.id = id
         self.basePath = basePath
         self.testingEnvironment = testingEnvironment
@@ -1070,12 +1090,14 @@ public class Account {
         self.managedOperationsDisposable.add(managedCloudChatRemoveMessagesOperations(postbox: self.postbox, network: self.network, stateManager: self.stateManager).start())
         self.managedOperationsDisposable.add(managedAutoremoveMessageOperations(network: self.network, postbox: self.postbox, isRemove: true).start())
         self.managedOperationsDisposable.add(managedAutoremoveMessageOperations(network: self.network, postbox: self.postbox, isRemove: false).start())
+        self.managedOperationsDisposable.add(managedPeerTimestampAttributeOperations(network: self.network, postbox: self.postbox).start())
         self.managedOperationsDisposable.add(managedGlobalNotificationSettings(postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedSynchronizePinnedChatsOperations(postbox: self.postbox, network: self.network, accountPeerId: self.peerId, stateManager: self.stateManager).start())
         
         self.managedOperationsDisposable.add(managedSynchronizeGroupedPeersOperations(postbox: self.postbox, network: self.network, stateManager: self.stateManager).start())
         self.managedOperationsDisposable.add(managedSynchronizeInstalledStickerPacksOperations(postbox: self.postbox, network: self.network, stateManager: self.stateManager, namespace: .stickers).start())
         self.managedOperationsDisposable.add(managedSynchronizeInstalledStickerPacksOperations(postbox: self.postbox, network: self.network, stateManager: self.stateManager, namespace: .masks).start())
+        self.managedOperationsDisposable.add(managedSynchronizeInstalledStickerPacksOperations(postbox: self.postbox, network: self.network, stateManager: self.stateManager, namespace: .emoji).start())
         self.managedOperationsDisposable.add(managedSynchronizeMarkFeaturedStickerPacksAsSeenOperations(postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedSynchronizeRecentlyUsedMediaOperations(postbox: self.postbox, network: self.network, category: .stickers, revalidationContext: self.mediaReferenceRevalidationContext).start())
         self.managedOperationsDisposable.add(managedSynchronizeSavedGifsOperations(postbox: self.postbox, network: self.network, revalidationContext: self.mediaReferenceRevalidationContext).start())
@@ -1091,6 +1113,9 @@ public class Account {
         self.managedOperationsDisposable.add(managedSynchronizeEmojiKeywordsOperations(postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedApplyPendingScheduledMessagesActions(postbox: self.postbox, network: self.network, stateManager: self.stateManager).start())
         self.managedOperationsDisposable.add(managedSynchronizeAvailableReactions(postbox: self.postbox, network: self.network).start())
+        self.managedOperationsDisposable.add(managedSynchronizeEmojiSearchCategories(postbox: self.postbox, network: self.network, kind: .emoji).start())
+        self.managedOperationsDisposable.add(managedSynchronizeEmojiSearchCategories(postbox: self.postbox, network: self.network, kind: .status).start())
+        self.managedOperationsDisposable.add(managedSynchronizeEmojiSearchCategories(postbox: self.postbox, network: self.network, kind: .avatar).start())
         self.managedOperationsDisposable.add(managedSynchronizeAttachMenuBots(postbox: self.postbox, network: self.network, force: true).start())
         self.managedOperationsDisposable.add(managedSynchronizeNotificationSoundList(postbox: self.postbox, network: self.network).start())
 
@@ -1147,7 +1172,6 @@ public class Account {
                 }
             }
         }))
-        self.managedOperationsDisposable.add(managedConfigurationUpdates(accountManager: accountManager, postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedVoipConfigurationUpdates(postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedAppConfigurationUpdates(postbox: self.postbox, network: self.network).start())
         self.managedOperationsDisposable.add(managedPremiumPromoConfigurationUpdates(postbox: self.postbox, network: self.network).start())
@@ -1168,13 +1192,27 @@ public class Account {
         if !self.supplementary {
             self.managedOperationsDisposable.add(managedAnimatedEmojiUpdates(postbox: self.postbox, network: self.network).start())
             self.managedOperationsDisposable.add(managedAnimatedEmojiAnimationsUpdates(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedGenericEmojiEffects(postbox: self.postbox, network: self.network).start())
+            
+            self.managedOperationsDisposable.add(managedGreetingStickers(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedPremiumStickers(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedAllPremiumStickers(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedRecentStatusEmoji(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedFeaturedStatusEmoji(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedProfilePhotoEmoji(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedGroupPhotoEmoji(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(managedRecentReactions(postbox: self.postbox, network: self.network).start())
+            self.managedTopReactionsDisposable.set(managedTopReactions(postbox: self.postbox, network: self.network).start())
+            self.managedOperationsDisposable.add(self.managedTopReactionsDisposable)
+            
+            self.managedOperationsDisposable.add(_internal_loadedStickerPack(postbox: self.postbox, network: self.network, reference: .iconStatusEmoji, forceActualized: true).start())
+            self.managedOperationsDisposable.add(_internal_loadedStickerPack(postbox: self.postbox, network: self.network, reference: .iconTopicEmoji, forceActualized: true).start())
         }
-        self.managedOperationsDisposable.add(managedGreetingStickers(postbox: self.postbox, network: self.network).start())
-        self.managedOperationsDisposable.add(managedPremiumStickers(postbox: self.postbox, network: self.network).start())
 
         if !supplementary {
             let mediaBox = postbox.mediaBox
-            self.storageSettingsDisposable = accountManager.sharedData(keys: [SharedDataKeys.cacheStorageSettings]).start(next: { [weak mediaBox] sharedData in
+            let _ = (accountManager.sharedData(keys: [SharedDataKeys.cacheStorageSettings])
+            |> take(1)).start(next: { [weak mediaBox] sharedData in
                 guard let mediaBox = mediaBox else {
                     return
                 }
@@ -1189,6 +1227,26 @@ public class Account {
                 let _ = try? data.write(to: URL(fileURLWithPath: "\(basePath)/notificationsKey"))
             }
         })
+        
+        self.stateManager.updateConfigRequested = { [weak self] in
+            self?.restartConfigurationUpdates()
+        }
+        self.restartConfigurationUpdates()
+        
+        self.stateManager.isPremiumUpdated = { [weak self] in
+            guard let strongSelf = self else {
+                return
+            }
+            strongSelf.managedTopReactionsDisposable.set(managedTopReactions(postbox: strongSelf.postbox, network: strongSelf.network).start())
+        }
+        
+        self.automaticCacheEvictionContext = AutomaticCacheEvictionContext(postbox: postbox, accountManager: accountManager)
+        
+        /*#if DEBUG
+        self.managedOperationsDisposable.add(debugFetchAllStickers(account: self).start(completed: {
+            print("debugFetchAllStickers done")
+        }))
+        #endif*/
     }
     
     deinit {
@@ -1199,6 +1257,10 @@ public class Account {
         self.storageSettingsDisposable?.dispose()
         self.smallLogPostDisposable.dispose()
         self.networkTypeDisposable?.dispose()
+    }
+    
+    private func restartConfigurationUpdates() {
+        self.managedOperationsDisposable.add(managedConfigurationUpdates(accountManager: self.accountManager, postbox: self.postbox, network: self.network).start())
     }
     
     private func postSmallLogIfNeeded() {
@@ -1235,6 +1297,19 @@ public class Account {
     
     public func resetCachedData() {
         self.viewTracker.reset()
+    }
+    
+    public func cleanupTasks(lowImpact: Bool) -> Signal<Never, NoError> {
+        let postbox = self.postbox
+        
+        return _internal_reindexCacheInBackground(account: self, lowImpact: lowImpact)
+        |> then(
+            Signal { subscriber in
+                return postbox.mediaBox.updateResourceIndex(lowImpact: lowImpact, completion: {
+                    subscriber.putCompletion()
+                })
+            }
+        )
     }
     
     public func restartContactManagement() {

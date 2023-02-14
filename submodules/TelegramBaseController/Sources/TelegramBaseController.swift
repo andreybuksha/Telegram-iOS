@@ -41,8 +41,7 @@ private func presentLiveLocationController(context: AccountContext, peerId: Peer
             }, callPeer: { _, _ in
             }, enqueueMessage: { message in
                 let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
-            }, sendSticker: nil,
-            setupTemporaryHiddenMedia: { _, _, _ in
+            }, sendSticker: nil, sendEmoji: nil, setupTemporaryHiddenMedia: { _, _, _ in
             }, chatAvatarHiddenMedia: { _, _ in
             }))
         }
@@ -688,41 +687,41 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                         }
                         strongSelf.context.sharedContext.mediaManager.playlistControl(.setBaseRate(baseRate), type: type)
                         
-                        var hasTooltip = false
-                        strongSelf.forEachController({ controller in
-                            if let controller = controller as? UndoOverlayController {
-                                hasTooltip = true
-                                controller.dismissWithCommitAction()
-                            }
-                            return true
-                        })
-                        
-                        let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
-                        let slowdown: Bool?
-                        if baseRate == .x1 {
-                            slowdown = true
-                        } else if baseRate == .x2 {
-                            slowdown = false
-                        } else {
-                            slowdown = nil
-                        }
-                        if let slowdown = slowdown {
-                            strongSelf.present(
-                                UndoOverlayController(
-                                    presentationData: presentationData,
-                                    content: .audioRate(
-                                        slowdown: slowdown,
-                                        text: slowdown ? presentationData.strings.Conversation_AudioRateTooltipNormal : presentationData.strings.Conversation_AudioRateTooltipSpeedUp
-                                    ),
-                                    elevatedLayout: false,
-                                    animateInAsReplacement: hasTooltip,
-                                    action: { action in
-                                        return true
-                                    }
-                                ),
-                                in: .current
-                            )
-                        }
+//                        var hasTooltip = false
+//                        strongSelf.forEachController({ controller in
+//                            if let controller = controller as? UndoOverlayController {
+//                                hasTooltip = true
+//                                controller.dismissWithCommitAction()
+//                            }
+//                            return true
+//                        })
+//                        
+//                        let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
+//                        let slowdown: Bool?
+//                        if baseRate == .x1 {
+//                            slowdown = true
+//                        } else if baseRate == .x2 {
+//                            slowdown = false
+//                        } else {
+//                            slowdown = nil
+//                        }
+//                        if let slowdown = slowdown {
+//                            strongSelf.present(
+//                                UndoOverlayController(
+//                                    presentationData: presentationData,
+//                                    content: .audioRate(
+//                                        slowdown: slowdown,
+//                                        text: slowdown ? presentationData.strings.Conversation_AudioRateTooltipNormal : presentationData.strings.Conversation_AudioRateTooltipSpeedUp
+//                                    ),
+//                                    elevatedLayout: false,
+//                                    animateInAsReplacement: hasTooltip,
+//                                    action: { action in
+//                                        return true
+//                                    }
+//                                ),
+//                                in: .current
+//                            )
+//                        }
                     })
                 }
                 mediaAccessoryPanel.togglePlayPause = { [weak self] in
@@ -744,20 +743,20 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                     guard let strongSelf = self, let _ = strongSelf.navigationController as? NavigationController, let (state, _, _, order, type, account) = strongSelf.playlistStateAndType else {
                         return
                     }
-                    if let id = state.id as? PeerMessagesMediaPlaylistItemId {
+                    if let id = state.id as? PeerMessagesMediaPlaylistItemId, let playlistLocation = strongSelf.playlistLocation as? PeerMessagesPlaylistLocation {
                         if type == .music {
-                            if let playlistLocation = strongSelf.playlistLocation as? PeerMessagesPlaylistLocation, case .custom = playlistLocation {
+                            if case .custom = playlistLocation {
                                 let controllerContext: AccountContext
                                 if account.id == strongSelf.context.account.id {
                                     controllerContext = strongSelf.context
                                 } else {
                                     controllerContext = strongSelf.context.sharedContext.makeTempAccountContext(account: account)
                                 }
-                                let controller = strongSelf.context.sharedContext.makeOverlayAudioPlayerController(context: controllerContext, peerId: id.messageId.peerId, type: type, initialMessageId: id.messageId, initialOrder: order, playlistLocation: playlistLocation, parentNavigationController: strongSelf.navigationController as? NavigationController)
+                                let controller = strongSelf.context.sharedContext.makeOverlayAudioPlayerController(context: controllerContext, chatLocation: .peer(id: id.messageId.peerId), type: type, initialMessageId: id.messageId, initialOrder: order, playlistLocation: playlistLocation, parentNavigationController: strongSelf.navigationController as? NavigationController)
                                 strongSelf.displayNode.view.window?.endEditing(true)
                                 strongSelf.present(controller, in: .window(.root))
-                            } else {
-                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(location: .id(id.messageId), count: 60, highlight: true), id: 0), context: strongSelf.context, chatLocation: .peer(id: id.messageId.peerId), subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tagMask: MessageTags.music)
+                            } else if case let .messages(chatLocation, _, _) = playlistLocation {
+                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(location: .id(id.messageId), count: 60, highlight: true), id: 0), context: strongSelf.context, chatLocation: chatLocation, subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tagMask: MessageTags.music)
                                 
                                 var cancelImpl: (() -> Void)?
                                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
@@ -794,7 +793,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                                         } else {
                                             controllerContext = strongSelf.context.sharedContext.makeTempAccountContext(account: account)
                                         }
-                                        let controller = strongSelf.context.sharedContext.makeOverlayAudioPlayerController(context: controllerContext, peerId: id.messageId.peerId, type: type, initialMessageId: id.messageId, initialOrder: order, playlistLocation: nil, parentNavigationController: strongSelf.navigationController as? NavigationController)
+                                        let controller = strongSelf.context.sharedContext.makeOverlayAudioPlayerController(context: controllerContext, chatLocation: chatLocation, type: type, initialMessageId: id.messageId, initialOrder: order, playlistLocation: nil, parentNavigationController: strongSelf.navigationController as? NavigationController)
                                         strongSelf.displayNode.view.window?.endEditing(true)
                                         strongSelf.present(controller, in: .window(.root))
                                     } else if index.1 {

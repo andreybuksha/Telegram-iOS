@@ -23,14 +23,16 @@ import Markdown
 
 final class BotCheckoutControllerArguments {
     fileprivate let account: Account
+    fileprivate let source: BotPaymentInvoiceSource
     fileprivate let openInfo: (BotCheckoutInfoControllerFocus) -> Void
     fileprivate let openPaymentMethod: () -> Void
     fileprivate let openShippingMethod: () -> Void
     fileprivate let updateTip: (Int64) -> Void
     fileprivate let ensureTipInputVisible: () -> Void
     
-    fileprivate init(account: Account, openInfo: @escaping (BotCheckoutInfoControllerFocus) -> Void, openPaymentMethod: @escaping () -> Void, openShippingMethod: @escaping () -> Void, updateTip: @escaping (Int64) -> Void, ensureTipInputVisible: @escaping () -> Void) {
+    fileprivate init(account: Account, source: BotPaymentInvoiceSource, openInfo: @escaping (BotCheckoutInfoControllerFocus) -> Void, openPaymentMethod: @escaping () -> Void, openShippingMethod: @escaping () -> Void, updateTip: @escaping (Int64) -> Void, ensureTipInputVisible: @escaping () -> Void) {
         self.account = account
+        self.source = source
         self.openInfo = openInfo
         self.openPaymentMethod = openPaymentMethod
         self.openShippingMethod = openShippingMethod
@@ -245,7 +247,7 @@ enum BotCheckoutEntry: ItemListNodeEntry {
         let arguments = arguments as! BotCheckoutControllerArguments
         switch self {
             case let .header(theme, invoice, botName):
-                return BotCheckoutHeaderItem(account: arguments.account, theme: theme, invoice: invoice, botName: botName, sectionId: self.section)
+                return BotCheckoutHeaderItem(account: arguments.account, theme: theme, invoice: invoice, source: arguments.source, botName: botName, sectionId: self.section)
             case let .price(_, theme, text, value, isFinal, hasSeparator, shimmeringIndex):
                 return BotCheckoutPriceItem(theme: theme, title: text, label: value, isFinal: isFinal, hasSeparator: hasSeparator, shimmeringIndex: shimmeringIndex, sectionId: self.section)
             case let .tip(_, _, text, currency, value, numericValue, maxValue, variants):
@@ -476,17 +478,24 @@ private func formSupportApplePay(_ paymentForm: BotPaymentForm) -> Bool {
 
 private func availablePaymentMethods(form: BotPaymentForm, current: BotCheckoutPaymentMethod?) -> [BotCheckoutPaymentMethod] {
     var methods: [BotCheckoutPaymentMethod] = []
+    var hasApplePay = false
     if formSupportApplePay(form) && hasApplePaySupport {
         methods.append(.applePay)
+        hasApplePay = true
+    }
+    
+    for savedCredentials in form.savedCredentials {
+        if !methods.contains(.savedCredentials(savedCredentials)) {
+            methods.append(.savedCredentials(savedCredentials))
+        }
+    }
+    
+    if !form.additionalPaymentMethods.isEmpty {
+        methods.append(contentsOf: form.additionalPaymentMethods.map { .other($0) })
     }
     if let current = current {
         if !methods.contains(current) {
-            methods.append(current)
-        }
-    }
-    if let savedCredentials = form.savedCredentials {
-        if !methods.contains(.savedCredentials(savedCredentials)) {
-            methods.append(.savedCredentials(savedCredentials))
+            methods.insert(current, at: hasApplePay ? 1 : 0)
         }
     }
     return methods
@@ -705,7 +714,7 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
         var openShippingMethodImpl: (() -> Void)?
         var ensureTipInputVisibleImpl: (() -> Void)?
         
-        let arguments = BotCheckoutControllerArguments(account: context.account, openInfo: { item in
+        let arguments = BotCheckoutControllerArguments(account: context.account, source: source, openInfo: { item in
             openInfoImpl?(item)
         }, openPaymentMethod: {
             openPaymentMethodImpl?()
@@ -805,9 +814,9 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
             }
         }
         
-        let openNewCard: () -> Void = { [weak self] in
+        let openNewCard: (String?) -> Void = { [weak self] customUrl in
             if let strongSelf = self, let paymentForm = strongSelf.paymentFormValue {
-                if let nativeProvider = paymentForm.nativeProvider, nativeProvider.name == "stripe" {
+                if customUrl == nil, let nativeProvider = paymentForm.nativeProvider, nativeProvider.name == "stripe" {
                     guard let paramsData = nativeProvider.params.data(using: .utf8) else {
                         return
                     }
@@ -830,7 +839,7 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                     }
                     
                     var dismissImpl: (() -> Void)?
-                    let canSave = paymentForm.canSaveCredentials || paymentForm.passwordMissing
+                    let canSave = customUrl == nil && (paymentForm.canSaveCredentials || paymentForm.passwordMissing)
                     let controller = BotCheckoutNativeCardEntryController(context: strongSelf.context, provider: .stripe(additionalFields: additionalFields, publishableKey: publishableKey), completion: { method in
                         guard let strongSelf = self else {
                             return
@@ -886,7 +895,7 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                         controller?.dismiss()
                     }
                     strongSelf.present(controller, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
-                } else if let nativeProvider = paymentForm.nativeProvider, nativeProvider.name == "smartglocal" {
+                } else if customUrl == nil, let nativeProvider = paymentForm.nativeProvider, nativeProvider.name == "smartglocal" {
                     guard let paramsData = nativeProvider.params.data(using: .utf8) else {
                         return
                     }
@@ -956,7 +965,7 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                     strongSelf.present(controller, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
                 } else {
                     var dismissImpl: (() -> Void)?
-                    let controller = BotCheckoutWebInteractionController(context: context, url: paymentForm.url, intent: .addPaymentMethod({ [weak self] token in
+                    let controller = BotCheckoutWebInteractionController(context: context, url: customUrl ?? paymentForm.url, intent: .addPaymentMethod({ [weak self] token in
                         dismissImpl?()
                         
                         guard let strongSelf = self else {
@@ -1055,12 +1064,14 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                 strongSelf.controller?.view.endEditing(true)
                 let methods = availablePaymentMethods(form: paymentForm, current: strongSelf.currentPaymentMethod)
                 if methods.isEmpty {
-                    openNewCard()
+                    openNewCard(nil)
                 } else {
                     strongSelf.present(BotCheckoutPaymentMethodSheetController(context: strongSelf.context, currentMethod: strongSelf.currentPaymentMethod, methods: methods, applyValue: { method in
                         applyPaymentMethod(method)
                     }, newCard: {
-                        openNewCard()
+                        openNewCard(nil)
+                    }, otherMethod: { url in
+                        openNewCard(url)
                     }), ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
                 }
             }
@@ -1099,7 +1110,7 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                 strongSelf.botPeerValue = formAndValidatedInfo.botPeer
                 strongSelf.currentFormInfo = savedInfo
                 strongSelf.currentValidatedFormInfo = formAndValidatedInfo.validatedFormInfo
-                if let savedCredentials = formAndValidatedInfo.form.savedCredentials {
+                if let savedCredentials = formAndValidatedInfo.form.savedCredentials.first {
                     strongSelf.currentPaymentMethod = .savedCredentials(savedCredentials)
                 }
                 strongSelf.actionButton.isEnabled = true
@@ -1281,6 +1292,22 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
             return
         }
         
+        let totalAmount = currentTotalPrice(paymentForm: paymentForm, validatedFormInfo: self.currentValidatedFormInfo, currentShippingOptionId: self.currentShippingOptionId, currentTip: self.currentTipAmount)
+        let currencyValue = formatCurrencyAmount(totalAmount, currency: paymentForm.invoice.currency)
+        
+        let proceedWithCompletion: (Bool, EngineMessage.Id?) -> Void = { [weak self] success, receiptMessageId in
+            guard let strongSelf = self else {
+                return
+            }
+
+            if success {
+                strongSelf.completed(currencyValue, receiptMessageId)
+                strongSelf.dismissAnimated()
+            } else {
+                strongSelf.dismissAnimated()
+            }
+        }
+        
         let credentials: BotPaymentCredentials
         if let receivedCredentials = receivedCredentials {
             credentials = receivedCredentials
@@ -1416,6 +1443,9 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                         }
                     })
                     return
+                case let .other(method):
+                    let _ = method
+                    return
             }
         }
         
@@ -1436,10 +1466,16 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                     if value {
                         strongSelf.pay(savedCredentialsToken: savedCredentialsToken, liabilityNoticeAccepted: true)
                     } else {
-                        let paymentText = strongSelf.presentationData.strings.Checkout_PaymentLiabilityAlert
+                        let paymentText: String
+                        if botPeer.id == providerPeer?.id {
+                            paymentText = strongSelf.presentationData.strings.Checkout_PaymentLiabilityBothAlert
+                            .replacingOccurrences(of: "{target}", with: botPeer.displayTitle(strings: strongSelf.presentationData.strings, displayOrder: strongSelf.presentationData.nameDisplayOrder))
+                        } else {
+                            paymentText = strongSelf.presentationData.strings.Checkout_PaymentLiabilityAlert
                             .replacingOccurrences(of: "{target}", with: botPeer.displayTitle(strings: strongSelf.presentationData.strings, displayOrder: strongSelf.presentationData.nameDisplayOrder))
                             .replacingOccurrences(of: "{payment_system}", with: providerPeer?.displayTitle(strings: strongSelf.presentationData.strings, displayOrder: strongSelf.presentationData.nameDisplayOrder) ?? "")
-
+                        }
+                        
                         strongSelf.present(textAlertController(context: strongSelf.context, title: strongSelf.presentationData.strings.Checkout_LiabilityAlertTitle, text: paymentText, actions: [TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_Cancel, action: { }), TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {
                             if let strongSelf = self {
                                 let _ = ApplicationSpecificNotice.setBotPaymentLiability(accountManager: strongSelf.context.sharedContext.accountManager, peerId: paymentForm.paymentBotId).start()
@@ -1461,9 +1497,6 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                 tipAmount = 0
             }
 
-            let totalAmount = currentTotalPrice(paymentForm: paymentForm, validatedFormInfo: self.currentValidatedFormInfo, currentShippingOptionId: self.currentShippingOptionId, currentTip: self.currentTipAmount)
-            let currencyValue = formatCurrencyAmount(totalAmount, currency: paymentForm.invoice.currency)
-
             self.payDisposable.set((self.context.engine.payments.sendBotPaymentForm(source: self.source, formId: paymentForm.id, validatedInfoId: self.currentValidatedFormInfo?.id, shippingOptionId: self.currentShippingOptionId, tipAmount: tipAmount, credentials: credentials) |> deliverOnMainQueue).start(next: { [weak self] result in
                 if let strongSelf = self {
                     strongSelf.inProgressDimNode.isUserInteractionEnabled = false
@@ -1477,19 +1510,6 @@ final class BotCheckoutControllerNode: ItemListControllerNode, PKPaymentAuthoriz
                     if let applePayController = strongSelf.applePayController {
                         strongSelf.applePayController = nil
                         applePayController.presentingViewController?.dismiss(animated: true, completion: nil)
-                    }
-
-                    let proceedWithCompletion: (Bool, EngineMessage.Id?) -> Void = { success, receiptMessageId in
-                        guard let strongSelf = self else {
-                            return
-                        }
-
-                        if success {
-                            strongSelf.dismissAnimated()
-                            strongSelf.completed(currencyValue, receiptMessageId)
-                        } else {
-                            strongSelf.dismissAnimated()
-                        }
                     }
                     
                     switch result {

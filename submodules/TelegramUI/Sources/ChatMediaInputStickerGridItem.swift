@@ -11,6 +11,8 @@ import AccountContext
 import AnimatedStickerNode
 import TelegramAnimatedStickerNode
 import ShimmerEffect
+import ChatControllerInteraction
+import ChatPresentationInterfaceState
 
 enum ChatMediaInputStickerGridSectionAccessory {
     case none
@@ -74,7 +76,7 @@ final class ChatMediaInputStickerGridSectionNode: ASDisplayNode {
                 self.setupNode = setupNode
             case .clear:
                 let setupNode = HighlightableButtonNode()
-                setupNode.setImage(PresentationResourcesChat.chatInputMediaPanelGridDismissImage(theme), for: [])
+                setupNode.setImage(PresentationResourcesChat.chatInputMediaPanelGridDismissImage(theme, color: theme.chat.inputMediaPanel.stickersSectionTextColor), for: [])
                 self.setupNode = setupNode
         }
         
@@ -290,12 +292,12 @@ final class ChatMediaInputStickerGridItemNode: GridItemNode {
                     let dimensions = item.stickerItem.file.dimensions ?? PixelDimensions(width: 512, height: 512)
                     let fittedSize = item.large ? CGSize(width: 384.0, height: 384.0) : CGSize(width: 160.0, height: 160.0)
                     if item.stickerItem.file.isVideoSticker {
-                        self.imageNode.setSignal(chatMessageSticker(account: item.account, file: item.stickerItem.file, small: false, synchronousLoad: synchronousLoads && isVisible))
+                        self.imageNode.setSignal(chatMessageSticker(account: item.account, userLocation: .other, file: item.stickerItem.file, small: false, synchronousLoad: synchronousLoads && isVisible))
                     } else {
-                        self.imageNode.setSignal(chatMessageAnimatedSticker(postbox: item.account.postbox, file: item.stickerItem.file, small: false, size: dimensions.cgSize.aspectFitted(fittedSize)))
+                        self.imageNode.setSignal(chatMessageAnimatedSticker(postbox: item.account.postbox, userLocation: .other, file: item.stickerItem.file, small: false, size: dimensions.cgSize.aspectFitted(fittedSize)))
                     }
                     self.updateVisibility()
-                    self.stickerFetchedDisposable.set(freeMediaFileResourceInteractiveFetched(account: item.account, fileReference: stickerPackFileReference(item.stickerItem.file), resource: item.stickerItem.file.resource).start())
+                    self.stickerFetchedDisposable.set(freeMediaFileResourceInteractiveFetched(account: item.account, userLocation: .other, fileReference: stickerPackFileReference(item.stickerItem.file), resource: item.stickerItem.file.resource).start())
                 } else {
                     if let animationNode = self.animationNode {
                         animationNode.visibility = false
@@ -304,8 +306,8 @@ final class ChatMediaInputStickerGridItemNode: GridItemNode {
                         self.imageNode.isHidden = false
                         self.didSetUpAnimationNode = false
                     }
-                    self.imageNode.setSignal(chatMessageSticker(account: item.account, file: item.stickerItem.file, small: !item.large, synchronousLoad: synchronousLoads && isVisible))
-                    self.stickerFetchedDisposable.set(freeMediaFileResourceInteractiveFetched(account: item.account, fileReference: stickerPackFileReference(item.stickerItem.file), resource: chatMessageStickerResource(file: item.stickerItem.file, small: !item.large)).start())
+                    self.imageNode.setSignal(chatMessageSticker(account: item.account, userLocation: .other, file: item.stickerItem.file, small: !item.large, synchronousLoad: synchronousLoads && isVisible))
+                    self.stickerFetchedDisposable.set(freeMediaFileResourceInteractiveFetched(account: item.account, userLocation: .other, fileReference: stickerPackFileReference(item.stickerItem.file), resource: chatMessageStickerResource(file: item.stickerItem.file, small: !item.large)).start())
                 }
                 
                 self.currentState = (item.account, item.stickerItem, dimensions.cgSize)
@@ -412,7 +414,7 @@ final class ChatMediaInputStickerGridItemNode: GridItemNode {
         if let interfaceInteraction = self.interfaceInteraction, let (_, item, _) = self.currentState, case .ended = recognizer.state {
             if let isLocked = self.isLocked, isLocked {
             } else {
-                let _ = interfaceInteraction.sendSticker(.standalone(media: item.file), false, false, nil, false, self, self.bounds)
+                let _ = interfaceInteraction.sendSticker(.standalone(media: item.file), false, false, nil, false, self.view, self.bounds, nil, [])
                 self.imageNode.layer.animateAlpha(from: 0.5, to: 1.0, duration: 1.0)
             }
         }
@@ -454,7 +456,7 @@ final class ChatMediaInputStickerGridItemNode: GridItemNode {
     func updatePreviewing(animated: Bool) {
         var isPreviewing = false
         if let (_, item, _) = self.currentState, let interaction = self.inputNodeInteraction {
-            isPreviewing = interaction.previewedStickerPackItem == .pack(item)
+            isPreviewing = interaction.previewedStickerPackItem == .pack(item.file)
         }
         if self.currentIsPreviewing != isPreviewing {
             self.currentIsPreviewing = isPreviewing

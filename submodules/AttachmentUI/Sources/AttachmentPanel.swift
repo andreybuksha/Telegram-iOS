@@ -16,6 +16,7 @@ import PhotoResources
 import AnimatedStickerComponent
 import SemanticStatusNode
 import MediaResources
+import MultilineTextComponent
 
 private let buttonSize = CGSize(width: 88.0, height: 49.0)
 private let smallButtonWidth: CGFloat = 69.0
@@ -123,6 +124,7 @@ private final class AttachButtonComponent: CombinedComponent {
     let strings: PresentationStrings
     let theme: PresentationTheme
     let action: () -> Void
+    let longPressAction: () -> Void
     
     init(
         context: AccountContext,
@@ -130,7 +132,8 @@ private final class AttachButtonComponent: CombinedComponent {
         isSelected: Bool,
         strings: PresentationStrings,
         theme: PresentationTheme,
-        action: @escaping () -> Void
+        action: @escaping () -> Void,
+        longPressAction: @escaping () -> Void
     ) {
         self.context = context
         self.type = type
@@ -138,6 +141,7 @@ private final class AttachButtonComponent: CombinedComponent {
         self.strings = strings
         self.theme = theme
         self.action = action
+        self.longPressAction = longPressAction
     }
 
     static func ==(lhs: AttachButtonComponent, rhs: AttachButtonComponent) -> Bool {
@@ -162,7 +166,7 @@ private final class AttachButtonComponent: CombinedComponent {
     static var body: Body {
         let icon = Child(IconComponent.self)
         let animatedIcon = Child(AnimatedStickerComponent.self)
-        let title = Child(Text.self)
+        let title = Child(MultilineTextComponent.self)
         let button = Child(Rectangle.self)
 
         return { context in
@@ -257,10 +261,15 @@ private final class AttachButtonComponent: CombinedComponent {
             }
 
             let title = title.update(
-                component: Text(
-                    text: name,
-                    font: Font.regular(10.0),
-                    color: context.component.isSelected ? component.theme.rootController.tabBar.selectedTextColor : component.theme.rootController.tabBar.textColor
+                component: MultilineTextComponent(
+                    text: .plain(NSAttributedString(
+                        string: name,
+                        font: Font.regular(10.0),
+                        textColor: context.component.isSelected ? component.theme.rootController.tabBar.selectedTextColor : component.theme.rootController.tabBar.textColor,
+                        paragraphAlignment: .center)),
+                    horizontalAlignment: .center,
+                    truncationType: .end,
+                    maximumNumberOfLines: 1
                 ),
                 availableSize: context.availableSize,
                 transition: .immediate
@@ -287,6 +296,11 @@ private final class AttachButtonComponent: CombinedComponent {
                 .gesture(.tap {
                     component.action()
                 })
+                .gesture(.longPress({ state in
+                    if case .began = state {
+                        component.longPressAction()
+                    }
+                }))
             )
                         
             return context.availableSize
@@ -458,6 +472,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
     private var presentationInterfaceState: ChatPresentationInterfaceState
     private var interfaceInteraction: ChatPanelInterfaceInteraction?
     
+    private let makeEntityInputView: () -> AttachmentTextInputPanelInputView?
+    
     private let containerNode: ASDisplayNode
     private let backgroundNode: NavigationBackgroundNode
     private let scrollNode: ASScrollNode
@@ -487,6 +503,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
     var isStandalone: Bool = false
     
     var selectionChanged: (AttachmentButtonType) -> Bool = { _ in return false }
+    var longPressed: (AttachmentButtonType) -> Void = { _ in }
+
     var beganTextEditing: () -> Void = {}
     var textUpdated: (NSAttributedString) -> Void = { _ in }
     var sendMessagePressed: (AttachmentTextInputPanelSendMode) -> Void = { _ in }
@@ -496,11 +514,13 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
     
     var mainButtonPressed: () -> Void = { }
     
-    init(context: AccountContext, chatLocation: ChatLocation, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?) {
+    init(context: AccountContext, chatLocation: ChatLocation, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?, makeEntityInputView: @escaping () -> AttachmentTextInputPanelInputView?) {
         self.context = context
         self.presentationData = updatedPresentationData?.initial ?? context.sharedContext.currentPresentationData.with { $0 }
+        
+        self.makeEntityInputView = makeEntityInputView
                 
-        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(previewing: false), chatLocation: chatLocation, subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil)
+        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(previewing: false), chatLocation: chatLocation, subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil)
         
         self.containerNode = ASDisplayNode()
         self.containerNode.clipsToBounds = true
@@ -593,7 +613,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, displayVideoUnmuteTip: { _ in
         }, switchMediaRecordingMode: {
         }, setupMessageAutoremoveTimeout: {
-        }, sendSticker: { _, _, _, _ in
+        }, sendSticker: { _, _, _, _, _, _ in
             return false
         }, unblockPeer: {
         }, pinMessage: { _, _ in
@@ -671,6 +691,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             }, schedule: { [weak textInputPanelNode] in
                 textInputPanelNode?.sendMessage(.schedule)
             })
+            controller.emojiViewProvider = textInputPanelNode.emojiViewProvider
             strongSelf.presentInGlobalOverlay(controller)
         }, openScheduledMessages: {
         }, openPeersNearby: {
@@ -691,6 +712,14 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, displayCopyProtectionTip: { _, _ in
         }, openWebView: { _, _, _, _ in  
         }, updateShowWebView: { _ in
+        }, insertText: { _ in
+        }, backwardsDeleteText: {
+        }, restartTopic: {
+        }, toggleTranslation: { _ in
+        }, changeTranslationLanguage: { _ in
+        }, addDoNotTranslateLanguage: { _ in
+        }, hideTranslationPanel: {
+        }, requestLayout: { _ in
         }, chatController: {
             return nil
         }, statuses: nil)
@@ -728,6 +757,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         self.scrollNode.view.delegate = self
         self.scrollNode.view.showsHorizontalScrollIndicator = false
         self.scrollNode.view.showsVerticalScrollIndicator = false
+        
+        self.view.accessibilityTraits = .tabBar
     }
     
     @objc private func buttonPressed() {
@@ -818,7 +849,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                                     let accountFullSizeData = Signal<(Data?, Bool), NoError> { subscriber in
                                         let accountResource = account.postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedPreparedSvgRepresentation(), complete: false, fetch: true)
                                         
-                                        let fetchedFullSize = fetchedMediaResource(mediaBox: account.postbox.mediaBox, reference: .media(media: .attachBot(peer: peer, media: file), resource: file.resource))
+                                        let fetchedFullSize = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: MediaResourceUserContentType(file: file), reference: .media(media: .attachBot(peer: peer, media: file), resource: file.resource))
                                         let fetchedFullSizeDisposable = fetchedFullSize.start()
                                         let fullSizeDisposable = accountResource.start()
                                         
@@ -830,7 +861,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                                     self.iconDisposables[file.fileId] = accountFullSizeData.start()
                                 }
                             } else {
-                                self.iconDisposables[file.fileId] = freeMediaFileInteractiveFetched(account: self.context.account, fileReference: .attachBot(peer: peer, media: file)).start()
+                                self.iconDisposables[file.fileId] = freeMediaFileInteractiveFetched(account: self.context.account, userLocation: .other, fileReference: .attachBot(peer: peer, media: file)).start()
                             }
                         }
                     }
@@ -855,12 +886,36 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                                 }
                             }
                         }
+                    }, longPressAction: { [weak self] in
+                        if let strongSelf = self, i == strongSelf.selectedIndex {
+                            strongSelf.longPressed(type)
+                        }
                     })
                 ),
                 environment: {},
                 containerSize: CGSize(width: buttonWidth, height: buttonSize.height)
             )
             buttonTransition.setFrame(view: buttonView, frame: buttonFrame)
+            var accessibilityTitle = ""
+            switch type {
+            case .gallery:
+                accessibilityTitle = self.presentationData.strings.Attachment_Gallery
+            case .file:
+                accessibilityTitle = self.presentationData.strings.Attachment_File
+            case .location:
+                accessibilityTitle = self.presentationData.strings.Attachment_Location
+            case .contact:
+                accessibilityTitle = self.presentationData.strings.Attachment_Contact
+            case .poll:
+                accessibilityTitle = self.presentationData.strings.Attachment_Poll
+            case let .app(_, appName, _):
+                accessibilityTitle = appName
+            case .standalone:
+                accessibilityTitle = ""
+            }
+            buttonView.isAccessibilityElement = true
+            buttonView.accessibilityLabel = accessibilityTitle
+            buttonView.accessibilityTraits = [.button]
         }
     }
     
@@ -893,7 +948,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 if let strongSelf = self {
                     strongSelf.present(c)
                 }
-            })
+            }, makeEntityInputView: self.makeEntityInputView)
             textInputPanelNode.interfaceInteraction = self.interfaceInteraction
             textInputPanelNode.sendMessage = { [weak self] mode in
                 if let strongSelf = self {
@@ -1096,7 +1151,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             if textInputPanelNode.frame.width.isZero {
                 panelTransition = .immediate
             }
-            let panelHeight = textInputPanelNode.updateLayout(width: layout.size.width, leftInset: insets.left + layout.safeInsets.left, rightInset: insets.right + layout.safeInsets.right, bottomInset: 0.0, additionalSideInsets: UIEdgeInsets(), maxHeight: layout.size.height / 2.0, isSecondary: false, transition: panelTransition, interfaceState: self.presentationInterfaceState, metrics: layout.metrics)
+            let panelHeight = textInputPanelNode.updateLayout(width: layout.size.width, leftInset: insets.left + layout.safeInsets.left, rightInset: insets.right + layout.safeInsets.right, bottomInset: 0.0, additionalSideInsets: UIEdgeInsets(), maxHeight: layout.size.height / 2.0, isSecondary: false, transition: panelTransition, interfaceState: self.presentationInterfaceState, metrics: layout.metrics, isMediaInputExpanded: false)
             let panelFrame = CGRect(x: 0.0, y: 0.0, width: layout.size.width, height: panelHeight)
             if textInputPanelNode.frame.width.isZero {
                 textInputPanelNode.frame = panelFrame

@@ -393,6 +393,10 @@ extension CoreAnimationLayer: RootAnimationLayer {
   func logHierarchyKeypaths() {
     // Unimplemented / unused
   }
+    
+  func allKeypaths(predicate: (AnimationKeypath) -> Bool) -> [String] {
+    return []
+  }
 
   func setValueProvider(_ valueProvider: AnyValueProvider, keypath: AnimationKeypath) {
     valueProviderStore.setValueProvider(valueProvider, keypath: keypath)
@@ -420,6 +424,11 @@ extension CoreAnimationLayer: RootAnimationLayer {
     LottieLogger.shared.assertionFailure("`AnimationKeypath`s are currently unsupported")
     return nil
   }
+    
+    func allLayers(for keypath: AnimationKeypath) -> [CALayer] {
+        LottieLogger.shared.assertionFailure("`AnimationKeypath`s are currently unsupported")
+        return []
+    }
 
   func animatorNodes(for _: AnimationKeypath) -> [AnimatorNode]? {
     LottieLogger.shared.assertionFailure("`AnimatorNode`s are not used in this rendering implementation")

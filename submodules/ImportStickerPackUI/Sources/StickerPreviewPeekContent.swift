@@ -9,14 +9,15 @@ import StickerResources
 import AnimatedStickerNode
 import TelegramAnimatedStickerNode
 import ContextUI
+import AccountContext
 
 final class StickerPreviewPeekContent: PeekControllerContent {
-    let account: Account
+    let context: AccountContext
     let item: ImportStickerPack.Sticker
     let menu: [ContextMenuItem]
     
-    init(account: Account, item: ImportStickerPack.Sticker, menu: [ContextMenuItem]) {
-        self.account = account
+    init(context: AccountContext, item: ImportStickerPack.Sticker, menu: [ContextMenuItem]) {
+        self.context = context
         self.item = item
         self.menu = menu
     }
@@ -34,7 +35,7 @@ final class StickerPreviewPeekContent: PeekControllerContent {
     }
     
     func node() -> PeekControllerContentNode & ASDisplayNode {
-        return StickerPreviewPeekContentNode(account: self.account, item: self.item)
+        return StickerPreviewPeekContentNode(account: self.context.account, item: self.item)
     }
     
     func topAccessoryNode() -> ASDisplayNode? {
@@ -63,6 +64,8 @@ private final class StickerPreviewPeekContentNode: ASDisplayNode, PeekController
     private var animationNode: AnimatedStickerNode?
     
     private var containerLayout: (ContainerViewLayout, CGFloat)?
+    
+    private let _ready = Promise<Bool>()
     
     init(account: Account, item: ImportStickerPack.Sticker) {
         self.account = account
@@ -104,6 +107,21 @@ private final class StickerPreviewPeekContentNode: ASDisplayNode, PeekController
         }
         
         self.addSubnode(self.textNode)
+        
+        if let animationNode = self.animationNode {
+            animationNode.started = { [weak self] in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf._ready.set(.single(true))
+            }
+        } else {
+            self._ready.set(.single(true))
+        }
+    }
+    
+    func ready() -> Signal<Bool, NoError> {
+        return self._ready.get()
     }
     
     func updateLayout(size: CGSize, transition: ContainedViewLayoutTransition) -> CGSize {

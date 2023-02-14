@@ -484,7 +484,7 @@ class ItemListStickerPackItemNode: ItemListRevealOptionsItemNode {
                     thumbnailItem = .animated(item.file.resource, item.file.dimensions ?? PixelDimensions(width: 100, height: 100), item.file.isVideoSticker)
                     resourceReference = MediaResourceReference.media(media: .standalone(media: item.file), resource: item.file.resource)
                 } else if let dimensions = item.file.dimensions, let resource = chatMessageStickerResource(file: item.file, small: true) as? TelegramMediaResource {
-                    thumbnailItem = .still(TelegramMediaImageRepresentation(dimensions: dimensions, resource: resource, progressiveSizes: [], immediateThumbnailData: nil))
+                    thumbnailItem = .still(TelegramMediaImageRepresentation(dimensions: dimensions, resource: resource, progressiveSizes: [], immediateThumbnailData: nil, hasVideo: false, isPersonal: false))
                     resourceReference = MediaResourceReference.media(media: .standalone(media: item.file), resource: resource)
                 }
             }
@@ -517,7 +517,7 @@ class ItemListStickerPackItemNode: ItemListRevealOptionsItemNode {
                         }
                 }
                 if fileUpdated, let resourceReference = resourceReference {
-                    updatedFetchSignal = fetchedMediaResource(mediaBox: item.account.postbox.mediaBox, reference: resourceReference)
+                    updatedFetchSignal = fetchedMediaResource(mediaBox: item.account.postbox.mediaBox, userLocation: .other, userContentType: .sticker, reference: resourceReference)
                 }
             } else {
                 updatedImageSignal = .single({ _ in return nil })
@@ -768,12 +768,13 @@ class ItemListStickerPackItemNode: ItemListRevealOptionsItemNode {
                                     strongSelf.animationNode = animationNode
                                     strongSelf.addSubnode(animationNode)
                                     
-                                    animationNode.setup(source: AnimatedStickerResourceSource(account: item.account, resource: resource, isVideo: isVideo), width: 80, height: 80, playbackMode: .loop, mode: .cached)
+                                    animationNode.setup(source: AnimatedStickerResourceSource(account: item.account, resource: resource, isVideo: isVideo), width: 80, height: 80, playbackMode: .loop, mode: .direct(cachePathPrefix: nil))
                                 }
                                 animationNode.visibility = strongSelf.visibility != .none && item.playAnimatedStickers
                                 animationNode.isHidden = !item.playAnimatedStickers
                                 strongSelf.imageNode.isHidden = item.playAnimatedStickers
                                 if let animationNode = strongSelf.animationNode {
+                                    animationNode.updateLayout(size: imageFrame.size)
                                     transition.updateFrame(node: animationNode, frame: imageFrame)
                                 }
                         }

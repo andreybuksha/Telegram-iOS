@@ -10,6 +10,7 @@ import TelegramUIPreferences
 import MergeLists
 import AccountContext
 import ChatPresentationInterfaceState
+import ChatControllerInteraction
 
 private struct CommandMenuChatInputContextPanelEntryStableId: Hashable {
     let command: PeerCommand
@@ -66,18 +67,19 @@ final class CommandMenuChatInputContextPanelNode: ChatInputContextPanelNode {
     
     private let disposable = MetaDisposable()
     
-    init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize, peerId: PeerId) {
+    init(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize, peerId: PeerId, chatPresentationContext: ChatPresentationContext) {
         self.listView = ListView()
         self.listView.clipsToBounds = false
         self.listView.isOpaque = false
         self.listView.stackFromBottom = true
+        self.listView.keepBottomItemOverscrollBackground = theme.list.plainBackgroundColor
         self.listView.limitHitTestToNodes = true
         self.listView.view.disablesInteractiveTransitionGestureRecognizer = true
         self.listView.accessibilityPageScrolledString = { row, count in
             return strings.VoiceOver_ScrollStatus(row, count).string
         }
         
-        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize)
+        super.init(context: context, theme: theme, strings: strings, fontSize: fontSize, chatPresentationContext: chatPresentationContext)
         
         self.isOpaque = false
         self.clipsToBounds = true
@@ -233,7 +235,7 @@ final class CommandMenuChatInputContextPanelNode: ChatInputContextPanelNode {
             self.listView.keepBottomItemOverscrollBackground = self.theme.list.plainBackgroundColor
             
             let new = self.currentEntries?.map({$0.withUpdatedTheme(interfaceState.theme)}) ?? []
-            prepareTransition(from: self.currentEntries, to: new)
+            self.prepareTransition(from: self.currentEntries, to: new)
         }
     }
     

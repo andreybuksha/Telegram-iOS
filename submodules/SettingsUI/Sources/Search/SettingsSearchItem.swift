@@ -41,14 +41,18 @@ extension SettingsSearchableItemIcon {
                 return PresentationResourcesSettings.watch
             case .passport:
                 return PresentationResourcesSettings.passport
-            case .wallet:
-                return PresentationResourcesSettings.wallet
             case .support:
                 return PresentationResourcesSettings.support
             case .faq:
                 return PresentationResourcesSettings.faq
             case .chatFolders:
                 return PresentationResourcesSettings.chatFolders
+            case .deleteAccount:
+                return PresentationResourcesSettings.deleteAccount
+            case .devices:
+                return PresentationResourcesSettings.devices
+            case .premium:
+                return PresentationResourcesSettings.premium
         }
     }
 }
@@ -67,6 +71,7 @@ final class SettingsSearchItem: ItemListControllerSearch {
     let archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>
     let privacySettings: Signal<AccountPrivacySettings?, NoError>
     let hasTwoStepAuth: Signal<Bool?, NoError>
+    let twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>
     let activeSessionsContext: Signal<ActiveSessionsContext?, NoError>
     let webSessionsContext: Signal<WebSessionsContext?, NoError>
     
@@ -74,7 +79,7 @@ final class SettingsSearchItem: ItemListControllerSearch {
     private var activity: ValuePromise<Bool> = ValuePromise(ignoreRepeated: false)
     private let activityDisposable = MetaDisposable()
     
-    init(context: AccountContext, theme: PresentationTheme, placeholder: String, activated: Bool, updateActivated: @escaping (Bool) -> Void, presentController: @escaping (ViewController, Any?) -> Void, pushController: @escaping (ViewController) -> Void, getNavigationController: (() -> NavigationController?)?, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
+    init(context: AccountContext, theme: PresentationTheme, placeholder: String, activated: Bool, updateActivated: @escaping (Bool) -> Void, presentController: @escaping (ViewController, Any?) -> Void, pushController: @escaping (ViewController) -> Void, getNavigationController: (() -> NavigationController?)?, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
         self.context = context
         self.theme = theme
         self.placeholder = placeholder
@@ -88,6 +93,7 @@ final class SettingsSearchItem: ItemListControllerSearch {
         self.archivedStickerPacks = archivedStickerPacks
         self.privacySettings = privacySettings
         self.hasTwoStepAuth = hasTwoStepAuth
+        self.twoStepAuthData = twoStepAuthData
         self.activeSessionsContext = activeSessionsContext
         self.webSessionsContext = webSessionsContext
         self.activityDisposable.set((activity.get() |> mapToSignal { value -> Signal<Bool, NoError> in
@@ -153,7 +159,7 @@ final class SettingsSearchItem: ItemListControllerSearch {
                 pushController(c)
             }, presentController: { c, a in
                 presentController(c, a)
-            }, getNavigationController: self.getNavigationController, resolvedFaqUrl: self.resolvedFaqUrl, exceptionsList: self.exceptionsList, archivedStickerPacks: self.archivedStickerPacks, privacySettings: self.privacySettings, hasTwoStepAuth: self.hasTwoStepAuth, activeSessionsContext: self.activeSessionsContext, webSessionsContext: self.webSessionsContext)
+            }, getNavigationController: self.getNavigationController, resolvedFaqUrl: self.resolvedFaqUrl, exceptionsList: self.exceptionsList, archivedStickerPacks: self.archivedStickerPacks, privacySettings: self.privacySettings, hasTwoStepAuth: self.hasTwoStepAuth, twoStepAuthData: self.twoStepAuthData, activeSessionsContext: self.activeSessionsContext, webSessionsContext: self.webSessionsContext)
         }
     }
 }
@@ -338,7 +344,7 @@ public final class SettingsSearchContainerNode: SearchDisplayControllerContentNo
     private var presentationDataDisposable: Disposable?
     private let presentationDataPromise: Promise<PresentationData>
     
-    public init(context: AccountContext, openResult: @escaping (SettingsSearchableItem) -> Void, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
+    public init(context: AccountContext, openResult: @escaping (SettingsSearchableItem) -> Void, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         self.presentationData = presentationData
         self.presentationDataPromise = Promise(self.presentationData)
@@ -372,7 +378,7 @@ public final class SettingsSearchContainerNode: SearchDisplayControllerContentNo
         })
         
         let searchableItems = Promise<[SettingsSearchableItem]>()
-        searchableItems.set(settingsSearchableItems(context: context, notificationExceptionsList: exceptionsList, archivedStickerPacks: archivedStickerPacks, privacySettings: privacySettings, hasTwoStepAuth: hasTwoStepAuth, activeSessionsContext: activeSessionsContext, webSessionsContext: webSessionsContext))
+        searchableItems.set(settingsSearchableItems(context: context, notificationExceptionsList: exceptionsList, archivedStickerPacks: archivedStickerPacks, privacySettings: privacySettings, hasTwoStepAuth: hasTwoStepAuth, twoStepAuthData: twoStepAuthData, activeSessionsContext: activeSessionsContext, webSessionsContext: webSessionsContext))
         
         let faqItems = Promise<[SettingsSearchableItem]>()
         faqItems.set(faqSearchableItems(context: context, resolvedUrl: resolvedFaqUrl, suggestAccountDeletion: false))
@@ -646,12 +652,13 @@ private final class SettingsSearchItemNode: ItemListControllerSearchNode {
     let archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>
     let privacySettings: Signal<AccountPrivacySettings?, NoError>
     let hasTwoStepAuth: Signal<Bool?, NoError>
+    let twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>
     let activeSessionsContext: Signal<ActiveSessionsContext?, NoError>
     let webSessionsContext: Signal<WebSessionsContext?, NoError>
     
     var cancel: () -> Void
     
-    init(context: AccountContext, cancel: @escaping () -> Void, updateActivity: @escaping(Bool) -> Void, pushController: @escaping (ViewController) -> Void, presentController: @escaping (ViewController, Any?) -> Void, getNavigationController: (() -> NavigationController?)?, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
+    init(context: AccountContext, cancel: @escaping () -> Void, updateActivity: @escaping(Bool) -> Void, pushController: @escaping (ViewController) -> Void, presentController: @escaping (ViewController, Any?) -> Void, getNavigationController: (() -> NavigationController?)?, resolvedFaqUrl: Signal<ResolvedUrl?, NoError>, exceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) {
         self.context = context
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
         self.cancel = cancel
@@ -663,6 +670,7 @@ private final class SettingsSearchItemNode: ItemListControllerSearchNode {
         self.archivedStickerPacks = archivedStickerPacks
         self.privacySettings = privacySettings
         self.hasTwoStepAuth = hasTwoStepAuth
+        self.twoStepAuthData = twoStepAuthData
         self.activeSessionsContext = activeSessionsContext
         self.webSessionsContext = webSessionsContext
         
@@ -704,7 +712,7 @@ private final class SettingsSearchItemNode: ItemListControllerSearchNode {
                     }
                 })
             }
-        }, resolvedFaqUrl: self.resolvedFaqUrl, exceptionsList: self.exceptionsList, archivedStickerPacks: self.archivedStickerPacks, privacySettings: self.privacySettings, hasTwoStepAuth: self.hasTwoStepAuth, activeSessionsContext: self.activeSessionsContext, webSessionsContext: self.webSessionsContext), cancel: { [weak self] in
+        }, resolvedFaqUrl: self.resolvedFaqUrl, exceptionsList: self.exceptionsList, archivedStickerPacks: self.archivedStickerPacks, privacySettings: self.privacySettings, hasTwoStepAuth: self.hasTwoStepAuth, twoStepAuthData: self.twoStepAuthData, activeSessionsContext: self.activeSessionsContext, webSessionsContext: self.webSessionsContext), cancel: { [weak self] in
             self?.cancel()
         })
         

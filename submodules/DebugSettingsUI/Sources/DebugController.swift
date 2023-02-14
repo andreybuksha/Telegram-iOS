@@ -59,6 +59,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
     case sendOneLog(PresentationTheme)
     case sendShareLogs
     case sendGroupCallLogs
+    case sendStorageStats
     case sendNotificationLogs(PresentationTheme)
     case sendCriticalLogs(PresentationTheme)
     case sendAllLogs
@@ -71,12 +72,15 @@ private enum DebugControllerEntry: ItemListNodeEntry {
     case skipReadHistory(PresentationTheme, Bool)
     case crashOnSlowQueries(PresentationTheme, Bool)
     case clearTips(PresentationTheme)
+    case resetTranslationStates(PresentationTheme)
     case crash(PresentationTheme)
     case resetData(PresentationTheme)
     case resetDatabase(PresentationTheme)
     case resetDatabaseAndCache(PresentationTheme)
     case resetHoles(PresentationTheme)
     case reindexUnread(PresentationTheme)
+    case resetCacheIndex
+    case reindexCache
     case resetBiometricsData(PresentationTheme)
     case resetWebViewCache(PresentationTheme)
     case optimizeDatabase(PresentationTheme)
@@ -86,11 +90,12 @@ private enum DebugControllerEntry: ItemListNodeEntry {
     case enableDebugDataDisplay(Bool)
     case acceleratedStickers(Bool)
     case experimentalBackground(Bool)
-    case inlineStickers(Bool)
+    case inlineForums(Bool)
     case localTranscription(Bool)
     case enableReactionOverrides(Bool)
     case playerEmbedding(Bool)
     case playlistPlayback(Bool)
+    case enableQuickReactionSwitch(Bool)
     case voiceConference
     case preferredVideoCodec(Int, String, String?, Bool)
     case disableVideoAspectScaling(Bool)
@@ -103,7 +108,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
         switch self {
         case .testStickerImport:
             return DebugControllerSection.sticker.rawValue
-        case .sendLogs, .sendOneLog, .sendShareLogs, .sendGroupCallLogs, .sendNotificationLogs, .sendCriticalLogs, .sendAllLogs:
+        case .sendLogs, .sendOneLog, .sendShareLogs, .sendGroupCallLogs, .sendStorageStats, .sendNotificationLogs, .sendCriticalLogs, .sendAllLogs:
             return DebugControllerSection.logs.rawValue
         case .accounts:
             return DebugControllerSection.logs.rawValue
@@ -111,7 +116,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return DebugControllerSection.logging.rawValue
         case .enableRaiseToSpeak, .keepChatNavigationStack, .skipReadHistory, .crashOnSlowQueries:
             return DebugControllerSection.experiments.rawValue
-        case .clearTips, .crash, .resetData, .resetDatabase, .resetDatabaseAndCache, .resetHoles, .reindexUnread, .resetBiometricsData, .resetWebViewCache, .optimizeDatabase, .photoPreview, .knockoutWallpaper, .playerEmbedding, .playlistPlayback, .voiceConference, .experimentalCompatibility, .enableDebugDataDisplay, .acceleratedStickers, .experimentalBackground, .inlineStickers, .localTranscription, . enableReactionOverrides, .restorePurchases:
+        case .clearTips, .resetTranslationStates, .crash, .resetData, .resetDatabase, .resetDatabaseAndCache, .resetHoles, .reindexUnread, .resetCacheIndex, .reindexCache, .resetBiometricsData, .resetWebViewCache, .optimizeDatabase, .photoPreview, .knockoutWallpaper, .playerEmbedding, .playlistPlayback, .enableQuickReactionSwitch, .voiceConference, .experimentalCompatibility, .enableDebugDataDisplay, .acceleratedStickers, .experimentalBackground, .inlineForums, .localTranscription, . enableReactionOverrides, .restorePurchases:
             return DebugControllerSection.experiments.rawValue
         case .preferredVideoCodec:
             return DebugControllerSection.videoExperiments.rawValue
@@ -140,70 +145,80 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return 6
         case .sendAllLogs:
             return 7
-        case .accounts:
+        case .sendStorageStats:
             return 8
-        case .logToFile:
+        case .accounts:
             return 9
-        case .logToConsole:
+        case .logToFile:
             return 10
-        case .redactSensitiveData:
+        case .logToConsole:
             return 11
-        case .enableRaiseToSpeak:
+        case .redactSensitiveData:
             return 12
-        case .keepChatNavigationStack:
+        case .enableRaiseToSpeak:
             return 13
-        case .skipReadHistory:
+        case .keepChatNavigationStack:
             return 14
-        case .crashOnSlowQueries:
+        case .skipReadHistory:
             return 15
-        case .clearTips:
+        case .crashOnSlowQueries:
             return 16
-        case .crash:
+        case .clearTips:
             return 17
-        case .resetData:
+        case .resetTranslationStates:
             return 18
-        case .resetDatabase:
+        case .crash:
             return 19
-        case .resetDatabaseAndCache:
+        case .resetData:
             return 20
-        case .resetHoles:
+        case .resetDatabase:
             return 21
-        case .reindexUnread:
+        case .resetDatabaseAndCache:
             return 22
-        case .resetBiometricsData:
+        case .resetHoles:
             return 23
-        case .resetWebViewCache:
+        case .reindexUnread:
             return 24
-        case .optimizeDatabase:
+        case .resetCacheIndex:
             return 25
-        case .photoPreview:
+        case .reindexCache:
             return 26
-        case .knockoutWallpaper:
+        case .resetBiometricsData:
             return 27
-        case .experimentalCompatibility:
+        case .resetWebViewCache:
             return 28
-        case .enableDebugDataDisplay:
+        case .optimizeDatabase:
             return 29
-        case .acceleratedStickers:
+        case .photoPreview:
             return 30
-        case .experimentalBackground:
+        case .knockoutWallpaper:
             return 31
-        case .inlineStickers:
+        case .experimentalCompatibility:
             return 32
-        case .localTranscription:
+        case .enableDebugDataDisplay:
             return 33
-        case .enableReactionOverrides:
+        case .acceleratedStickers:
             return 34
-        case .restorePurchases:
+        case .experimentalBackground:
             return 35
-        case .playerEmbedding:
+        case .inlineForums:
             return 36
-        case .playlistPlayback:
+        case .localTranscription:
             return 37
-        case .voiceConference:
+        case .enableReactionOverrides:
             return 38
+        case .restorePurchases:
+            return 39
+        case .playerEmbedding:
+            return 40
+        case .playlistPlayback:
+            return 41
+        case .enableQuickReactionSwitch:
+            return 42
+        case .voiceConference:
+            return 43
         case let .preferredVideoCodec(index, _, _, _):
-            return 39 + index
+            return 44 + index
         case .disableVideoAspectScaling:
             return 100
         case .enableVoipTcp:
@@ -251,7 +266,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                             actionSheet?.dismissAnimated()
 
                             let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                            controller.peerSelected = { [weak controller] peer in
+                            controller.peerSelected = { [weak controller] peer, _ in
                                 let peerId = peer.id
 
                                 if let strongController = controller {
@@ -291,7 +306,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-Full.txt.zip")])
-                                    let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                 }
@@ -335,7 +350,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                 actionSheet?.dismissAnimated()
                                 
                                 let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                                controller.peerSelected = { [weak controller] peer in
+                                controller.peerSelected = { [weak controller] peer, _ in
                                     let peerId = peer.id
                                     
                                     if let strongController = controller {
@@ -371,7 +386,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                         context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: logData)
                                         
                                         let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(logData.count), attributes: [.FileName(fileName: "Log-iOS-Short.txt")])
-                                        let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                        let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                                         
                                         let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                     }
@@ -417,7 +432,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                             actionSheet?.dismissAnimated()
 
                             let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                            controller.peerSelected = { [weak controller] peer in
+                            controller.peerSelected = { [weak controller] peer, _ in
                                 let peerId = peer.id
 
                                 if let strongController = controller {
@@ -457,7 +472,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-Full.txt.zip")])
-                                    let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                 }
@@ -501,7 +516,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                             actionSheet?.dismissAnimated()
 
                             let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                            controller.peerSelected = { [weak controller] peer in
+                            controller.peerSelected = { [weak controller] peer, _ in
                                 let peerId = peer.id
 
                                 if let strongController = controller {
@@ -541,7 +556,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-Full.txt.zip")])
-                                    let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                 }
@@ -573,7 +588,8 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             })
         case .sendNotificationLogs:
             return ItemListDisclosureItem(presentationData: presentationData, title: "Send Notification Logs (Up to 40 MB)", label: "", sectionId: self.section, style: .blocks, action: {
-                let _ = (Logger(rootPath: arguments.sharedContext.basePath, basePath: arguments.sharedContext.basePath + "/logs/notification-logs").collectLogs()
+                let logsPath = arguments.sharedContext.basePath + "/logs/notification-logs"
+                let _ = (Logger(rootPath: logsPath, basePath: logsPath).collectLogs()
                     |> deliverOnMainQueue).start(next: { logs in
                     let presentationData = arguments.sharedContext.currentPresentationData.with { $0 }
                     let actionSheet = ActionSheetController(presentationData: presentationData)
@@ -585,7 +601,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                             actionSheet?.dismissAnimated()
 
                             let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                            controller.peerSelected = { [weak controller] peer in
+                            controller.peerSelected = { [weak controller] peer, _ in
                                 let peerId = peer.id
 
                                 if let strongController = controller {
@@ -625,7 +641,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-Full.txt.zip")])
-                                    let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                 }
@@ -669,7 +685,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                 actionSheet?.dismissAnimated()
                                 
                                 let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                                controller.peerSelected = { [weak controller] peer in
+                                controller.peerSelected = { [weak controller] peer, _ in
                                     let peerId = peer.id
                                     
                                     if let strongController = controller {
@@ -678,7 +694,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                         let messages = logs.map { (name, path) -> EnqueueMessage in
                                             let id = Int64.random(in: Int64.min ... Int64.max)
                                             let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
-                                            return .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                            return .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                                         }
                                         let _ = enqueueMessages(account: context.account, peerId: peerId, messages: messages).start()
                                     }
@@ -721,7 +737,8 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                 
                 var logByType: [Signal<(type: String, logs: [(String, String)]), NoError>] = []
                 for type in logTypes {
-                    logByType.append(Logger(rootPath: arguments.sharedContext.basePath, basePath: arguments.sharedContext.basePath + "/logs/\(type)").collectLogs()
+                    let logsPath = arguments.sharedContext.basePath + "/logs/\(type)"
+                    logByType.append(Logger(rootPath: logsPath, basePath: logsPath).collectLogs()
                     |> map { result -> (type: String, logs: [(String, String)]) in
                         return (type, result)
                     })
@@ -741,7 +758,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                             actionSheet?.dismissAnimated()
 
                             let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-                            controller.peerSelected = { [weak controller] peer in
+                            controller.peerSelected = { [weak controller] peer, _ in
                                 let peerId = peer.id
 
                                 if let strongController = controller {
@@ -786,7 +803,62 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                                     let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/zip", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-All.txt.zip")])
-                                    let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
+
+                                    let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
+                                }
+                            }
+                            arguments.pushController(controller)
+                        }))
+                    }
+
+                    actionSheet.setItemGroups([ActionSheetItemGroup(items: items), ActionSheetItemGroup(items: [
+                        ActionSheetButtonItem(title: presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak actionSheet] in
+                            actionSheet?.dismissAnimated()
+                        })
+                    ])])
+                    arguments.presentController(actionSheet, nil)
+                })
+            })
+        case .sendStorageStats:
+            return ItemListDisclosureItem(presentationData: presentationData, title: "Send Storage Stats", label: "", sectionId: self.section, style: .blocks, action: {
+                guard let context = arguments.context, context.sharedContext.applicationBindings.isMainApp else {
+                    return
+                }
+                
+                let allStats: Signal<Data, NoError> = Signal { subscriber in
+                    DispatchQueue.global().async {
+                        let log = collectRawStorageUsageReport(containerPath: context.sharedContext.applicationBindings.containerPath)
+                        subscriber.putNext(log.data(using: .utf8) ?? Data())
+                    }
+                    
+                    return EmptyDisposable
+                }
+                
+                let _ = (allStats
+                |> deliverOnMainQueue).start(next: { allStatsData in
+                    let presentationData = arguments.sharedContext.currentPresentationData.with { $0 }
+                    let actionSheet = ActionSheetController(presentationData: presentationData)
+
+                    var items: [ActionSheetButtonItem] = []
+
+                    if let context = arguments.context, context.sharedContext.applicationBindings.isMainApp {
+                        items.append(ActionSheetButtonItem(title: "Via Telegram", color: .accent, action: { [weak actionSheet] in
+                            actionSheet?.dismissAnimated()
+
+                            let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
+                            controller.peerSelected = { [weak controller] peer, _ in
+                                let peerId = peer.id
+
+                                if let strongController = controller {
+                                    strongController.dismiss()
+
+                                    let id = Int64.random(in: Int64.min ... Int64.max)
+                                    let fileResource = LocalFileMediaResource(fileId: id, size: Int64(allStatsData.count), isSecretRelated: false)
+                                    context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: allStatsData)
+
+                                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/zip", size: Int64(allStatsData.count), attributes: [.FileName(fileName: "StorageReport.txt")])
+                                    let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
                                 }
@@ -870,6 +942,14 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     ]).start()
 
                     let _ = context.engine.peers.unmarkChatListFeaturedFiltersAsSeen()
+                }
+            })
+        case .resetTranslationStates:
+            return ItemListActionItem(presentationData: presentationData, title: "Reset Translation States", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                if let context = arguments.context {
+                    let _ = context.engine.itemCache.clear(collectionIds: [
+                        ApplicationSpecificItemCacheCollectionId.translationState
+                    ]).start()
                 }
             })
         case .crash:
@@ -965,6 +1045,54 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     controller.dismiss()
                 })
             })
+        case .resetCacheIndex:
+            return ItemListActionItem(presentationData: presentationData, title: "Reset Cache Index [!]", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                guard let context = arguments.context else {
+                    return
+                }
+                
+                context.account.postbox.mediaBox.storageBox.reset()
+            })
+        case .reindexCache:
+            return ItemListActionItem(presentationData: presentationData, title: "Reindex Cache", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                guard let context = arguments.context else {
+                    return
+                }
+                
+                var signal = context.engine.resources.reindexCacheInBackground(lowImpact: false)
+                
+                var cancelImpl: (() -> Void)?
+                let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+                let progressSignal = Signal<Never, NoError> { subscriber in
+                    let controller = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: {
+                        cancelImpl?()
+                    }))
+                    arguments.presentController(controller, nil)
+                    return ActionDisposable { [weak controller] in
+                        Queue.mainQueue().async() {
+                            controller?.dismiss()
+                        }
+                    }
+                }
+                |> runOn(Queue.mainQueue())
+                |> delay(0.15, queue: Queue.mainQueue())
+                let progressDisposable = progressSignal.start()
+                
+                let reindexDisposable = MetaDisposable()
+                
+                signal = signal
+                |> afterDisposed {
+                    Queue.mainQueue().async {
+                        progressDisposable.dispose()
+                    }
+                }
+                cancelImpl = {
+                    reindexDisposable.set(nil)
+                }
+                reindexDisposable.set((signal
+                |> deliverOnMainQueue).start(completed: {
+                }))
+            })
         case .resetBiometricsData:
             return ItemListActionItem(presentationData: presentationData, title: "Reset Biometrics Data", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                 let _ = updatePresentationPasscodeSettingsInteractively(accountManager: arguments.sharedContext.accountManager, { settings in
@@ -1051,12 +1179,12 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     })
                 }).start()
             })
-        case let .inlineStickers(value):
-            return ItemListSwitchItem(presentationData: presentationData, title: "Inline Stickers", value: value, sectionId: self.section, style: .blocks, updated: { value in
+        case let .inlineForums(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Inline Forums", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
                     transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
                         var settings = settings?.get(ExperimentalUISettings.self) ?? ExperimentalUISettings.defaultSettings
-                        settings.inlineStickers = value
+                        settings.inlineForums = value
                         return PreferencesEntry(settings)
                     })
                 }).start()
@@ -1101,6 +1229,16 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
                         var settings = settings?.get(ExperimentalUISettings.self) ?? ExperimentalUISettings.defaultSettings
                         settings.playlistPlayback = value
+                        return PreferencesEntry(settings)
+                    })
+                }).start()
+            })
+        case let .enableQuickReactionSwitch(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Enable Quick Reaction", value: value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings?.get(ExperimentalUISettings.self) ?? ExperimentalUISettings.defaultSettings
+                        settings.disableQuickReaction = !value
                         return PreferencesEntry(settings)
                     })
                 }).start()
@@ -1182,6 +1320,7 @@ private func debugControllerEntries(sharedContext: SharedAccountContext, present
     entries.append(.sendNotificationLogs(presentationData.theme))
     entries.append(.sendCriticalLogs(presentationData.theme))
     entries.append(.sendAllLogs)
+    entries.append(.sendStorageStats)
     if isMainApp {
         entries.append(.accounts(presentationData.theme))
     }
@@ -1200,6 +1339,7 @@ private func debugControllerEntries(sharedContext: SharedAccountContext, present
     entries.append(.crashOnSlowQueries(presentationData.theme, experimentalSettings.crashOnLongQueries))
     if isMainApp {
         entries.append(.clearTips(presentationData.theme))
+        entries.append(.resetTranslationStates(presentationData.theme))
     }
     entries.append(.crash(presentationData.theme))
     entries.append(.resetData(presentationData.theme))
@@ -1208,6 +1348,8 @@ private func debugControllerEntries(sharedContext: SharedAccountContext, present
     entries.append(.resetHoles(presentationData.theme))
     if isMainApp {
         entries.append(.reindexUnread(presentationData.theme))
+        entries.append(.resetCacheIndex)
+        entries.append(.reindexCache)
         entries.append(.resetWebViewCache(presentationData.theme))
     }
     entries.append(.optimizeDatabase(presentationData.theme))
@@ -1217,7 +1359,7 @@ private func debugControllerEntries(sharedContext: SharedAccountContext, present
         entries.append(.enableDebugDataDisplay(experimentalSettings.enableDebugDataDisplay))
         entries.append(.acceleratedStickers(experimentalSettings.acceleratedStickers))
         entries.append(.experimentalBackground(experimentalSettings.experimentalBackground))
-        entries.append(.inlineStickers(experimentalSettings.inlineStickers))
+        entries.append(.inlineForums(experimentalSettings.inlineForums))
         entries.append(.localTranscription(experimentalSettings.localTranscription))
         if case .internal = sharedContext.applicationBindings.appBuildType {
             entries.append(.enableReactionOverrides(experimentalSettings.enableReactionOverrides))
@@ -1225,6 +1367,7 @@ private func debugControllerEntries(sharedContext: SharedAccountContext, present
         entries.append(.restorePurchases(presentationData.theme))
         entries.append(.playerEmbedding(experimentalSettings.playerEmbedding))
         entries.append(.playlistPlayback(experimentalSettings.playlistPlayback))
+        entries.append(.enableQuickReactionSwitch(!experimentalSettings.disableQuickReaction))
     }
     
     let codecs: [(String, String?)] = [
@@ -1343,7 +1486,7 @@ public func triggerDebugSendLogsUI(context: AccountContext, additionalInfo: Stri
     let _ = (Logger.shared.collectLogs()
     |> deliverOnMainQueue).start(next: { logs in
         let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyWriteable, .excludeDisabled]))
-        controller.peerSelected = { [weak controller] peer in
+        controller.peerSelected = { [weak controller] peer, _ in
             let peerId = peer.id
 
             if let strongController = controller {
@@ -1388,7 +1531,7 @@ public func triggerDebugSendLogsUI(context: AccountContext, additionalInfo: Stri
                 context.account.postbox.mediaBox.storeResourceData(fileResource.id, data: gzippedData)
 
                 let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(gzippedData.count), attributes: [.FileName(fileName: "Log-iOS-Full.txt.zip")])
-                let message: EnqueueMessage = .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)
+                let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
 
                 let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
             }

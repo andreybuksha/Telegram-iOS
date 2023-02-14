@@ -5,6 +5,21 @@ import ContextUI
 import Postbox
 import TelegramCore
 import SwiftSignalKit
+ 
+final class ChatMessageContextLocationContentSource: ContextLocationContentSource {
+    private let controller: ViewController
+    private let location: CGPoint
+    
+    init(controller: ViewController, location: CGPoint) {
+        self.controller = controller
+        self.location = location
+    }
+    
+    func transitionInfo() -> ContextControllerLocationViewInfo? {
+        return ContextControllerLocationViewInfo(location: self.location, contentAreaInScreenSpace: UIScreen.main.bounds)
+    }
+}
+
 
 final class ChatMessageContextExtractedContentSource: ContextExtractedContentSource {
     let keepInPlace: Bool = false
@@ -84,7 +99,7 @@ final class ChatMessageReactionContextExtractedContentSource: ContextExtractedCo
     let keepInPlace: Bool = false
     let ignoreContentTouches: Bool = true
     let blurBackground: Bool = true
-    let centerActionsHorizontally: Bool = true
+    let actionsHorizontalAlignment: ContextActionsHorizontalAlignment = .center
     
     private weak var chatNode: ChatControllerNode?
     private let engine: TelegramEngine
@@ -159,7 +174,7 @@ final class ChatMessageNavigationButtonContextExtractedContentSource: ContextExt
     let keepInPlace: Bool = false
     let ignoreContentTouches: Bool = true
     let blurBackground: Bool = true
-    let centerActionsHorizontally: Bool = true
+    let actionsHorizontalAlignment: ContextActionsHorizontalAlignment = .center
     
     private weak var chatNode: ChatControllerNode?
     private let contentNode: ContextExtractedContentContainingNode

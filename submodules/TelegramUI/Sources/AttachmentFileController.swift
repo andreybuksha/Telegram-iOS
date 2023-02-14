@@ -163,7 +163,37 @@ private func attachmentFileControllerEntries(presentationData: PresentationData,
     return entries
 }
 
-private class AttachmentFileControllerImpl: ItemListController, AttachmentContainable {
+private final class AttachmentFileContext: AttachmentMediaPickerContext {
+    var selectionCount: Signal<Int, NoError> {
+        return .single(0)
+    }
+    
+    var caption: Signal<NSAttributedString?, NoError> {
+        return .single(nil)
+    }
+    
+    public var loadingProgress: Signal<CGFloat?, NoError> {
+        return .single(nil)
+    }
+    
+    public var mainButtonState: Signal<AttachmentMainButtonState?, NoError> {
+        return .single(nil)
+    }
+            
+    func setCaption(_ caption: NSAttributedString) {
+    }
+    
+    func send(silently: Bool, mode: AttachmentMediaPickerSendMode) {
+    }
+    
+    func schedule() {
+    }
+    
+    func mainButtonAction() {
+    }
+}
+
+class AttachmentFileControllerImpl: ItemListController, AttachmentContainable {
     public var requestAttachmentMenuExpansion: () -> Void = {}
     public var updateNavigationStack: (@escaping ([AttachmentContainable]) -> ([AttachmentContainable], AttachmentMediaPickerContext?)) -> Void = { _ in }
     public var updateTabBarAlpha: (CGFloat, ContainedViewLayoutTransition) -> Void = { _, _ in }
@@ -174,15 +204,19 @@ private class AttachmentFileControllerImpl: ItemListController, AttachmentContai
     var delayDisappear = false
     
     var resetForReuseImpl: () -> Void = {}
-    public func resetForReuse() {
+    func resetForReuse() {
         self.resetForReuseImpl()
         self.scrollToTop?()
     }
     
-    public func prepareForReuse() {
+    func prepareForReuse() {
         self.delayDisappear = true
         self.visibleBottomContentOffsetChanged?(self.visibleBottomContentOffset)
         self.delayDisappear = false
+    }
+    
+    public var mediaPickerContext: AttachmentMediaPickerContext? {
+        return AttachmentFileContext()
     }
 }
 
@@ -190,7 +224,7 @@ private struct AttachmentFileControllerState: Equatable {
     var searching: Bool
 }
 
-public func attachmentFileController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, bannedSendMedia: (Int32, Bool)?, presentGallery: @escaping () -> Void, presentFiles: @escaping () -> Void, send: @escaping (AnyMediaReference) -> Void) -> AttachmentContainable {
+func attachmentFileController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)? = nil, bannedSendMedia: (Int32, Bool)?, presentGallery: @escaping () -> Void, presentFiles: @escaping () -> Void, send: @escaping (AnyMediaReference) -> Void) -> AttachmentFileControllerImpl {
     let actionsDisposable = DisposableSet()
     
     let statePromise = ValuePromise(AttachmentFileControllerState(searching: false), ignoreRepeated: true)
@@ -239,8 +273,8 @@ public func attachmentFileController(context: AccountContext, updatedPresentatio
     )
     |> map { presentationData, recentDocuments, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
         var presentationData = presentationData
-        if presentationData.theme.list.blocksBackgroundColor.rgb == 0x000000 {
-            let updatedTheme = presentationData.theme.withInvertedBlocksBackground()
+        if presentationData.theme.list.blocksBackgroundColor.rgb == presentationData.theme.list.plainBackgroundColor.rgb {
+            let updatedTheme = presentationData.theme.withModalBlocksBackground()
             presentationData = presentationData.withUpdated(theme: updatedTheme)
         }
         
@@ -310,7 +344,7 @@ public func attachmentFileController(context: AccountContext, updatedPresentatio
     controller.visibleBottomContentOffsetChanged = { [weak controller] offset in
         switch offset {
             case let .known(value):
-            let backgroundAlpha: CGFloat = min(30.0, max(0.0, value)) / 30.0
+                let backgroundAlpha: CGFloat = min(30.0, max(0.0, value)) / 30.0
                 if backgroundAlpha.isZero && controller?.delayDisappear == true {
                     Queue.mainQueue().after(0.25, {
                         controller?.updateTabBarAlpha(backgroundAlpha, .animated(duration: 0.1, curve: .easeInOut))
@@ -320,7 +354,7 @@ public func attachmentFileController(context: AccountContext, updatedPresentatio
                 }
             case .unknown, .none:
                 controller?.updateTabBarAlpha(1.0, .immediate)
-            controller?.delayDisappear = false
+                controller?.delayDisappear = false
         }
     }
     controller.resetForReuseImpl = {

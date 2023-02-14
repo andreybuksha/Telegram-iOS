@@ -240,6 +240,8 @@ public final class WindowKeyboardGestureRecognizerDelegate: NSObject, UIGestureR
 
 public class Window1 {
     public let hostView: WindowHostView
+    public let badgeView: UIImageView
+    private let customProximityDimView: UIView
     
     private var deviceMetrics: DeviceMetrics
     
@@ -256,8 +258,6 @@ public class Window1 {
     private var updatingLayout: UpdatingLayout?
     private var updatedContainerLayout: ContainerViewLayout?
     private var upperKeyboardInputPositionBound: CGFloat?
-    private var cachedWindowSubviewCount: Int = 0
-    private var cachedHasPreview: Bool = false
     
     private let presentationContext: PresentationContext
     private let overlayPresentationContext: GlobalOverlayPresentationContext
@@ -269,10 +269,7 @@ public class Window1 {
     private var shouldInvalidateSupportedOrientations = false
     
     private var statusBarHidden = false
-    
-    public var previewThemeAccentColor: UIColor = .blue
-    public var previewThemeDarkBlur: Bool = false
-    
+        
     private var shouldNotAnimateLikelyKeyboardAutocorrectionSwitch: Bool = false
     
     public private(set) var forceInCallStatusBarText: String? = nil
@@ -328,6 +325,14 @@ public class Window1 {
     
     public init(hostView: WindowHostView, statusBarHost: StatusBarHost?) {
         self.hostView = hostView
+        self.badgeView = UIImageView()
+        self.badgeView.image = UIImage(bundleImageName: "Components/AppBadge")
+        self.badgeView.isHidden = true
+        
+        self.customProximityDimView = UIView()
+        self.customProximityDimView.backgroundColor = .black
+        self.customProximityDimView.isHidden = true
+        
         self.systemUserInterfaceStyle = hostView.systemUserInterfaceStyle
         
         let boundsSize = self.hostView.eventView.bounds.size
@@ -485,7 +490,16 @@ public class Window1 {
         
         self.keyboardFrameChangeObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: nil, using: { [weak self] notification in
             if let strongSelf = self {
+                var isTablet = false
+                if case .regular = strongSelf.windowLayout.metrics.widthClass {
+                    isTablet = true
+                }
+                
                 var keyboardFrame: CGRect = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? CGRect()
+                if isTablet && keyboardFrame.isEmpty {
+                    return
+                }
+                                
                 if #available(iOSApplicationExtension 14.2, iOS 14.2, *), UIAccessibility.prefersCrossFadeTransitions {
                 } else if let keyboardView = strongSelf.statusBarHost?.keyboardView {
                     if keyboardFrame.width.isEqual(to: keyboardView.bounds.width) && keyboardFrame.height.isEqual(to: keyboardView.bounds.height) && keyboardFrame.minX.isEqual(to: keyboardView.frame.minX) {
@@ -535,12 +549,23 @@ public class Window1 {
                 
                 var keyboardHeight: CGFloat
                 if keyboardFrame.isEmpty || keyboardFrame.maxY < screenHeight {
-                    keyboardHeight = 0.0
+                    if inPopover || (isTablet && screenHeight - keyboardFrame.maxY < 5.0) {
+                        keyboardHeight = max(0.0, screenHeight - keyboardFrame.minY)
+                        if inPopover && !keyboardHeight.isZero {
+                            keyboardHeight = max(0.0, keyboardHeight - popoverDelta)
+                        }
+                    } else {
+                        keyboardHeight = 0.0
+                    }
                 } else {
                     keyboardHeight = max(0.0, screenHeight - keyboardFrame.minY)
                     if inPopover && !keyboardHeight.isZero {
                         keyboardHeight = max(0.0, keyboardHeight - popoverDelta)
                     }
+                }
+                
+                if strongSelf.hostView.containerView is ChildWindowHostView, !isTablet {
+                    keyboardHeight += 27.0
                 }
                 
                 print("keyboardHeight: \(keyboardHeight) (raw: \(keyboardFrame))")
@@ -626,8 +651,10 @@ public class Window1 {
         }
         self.windowPanRecognizer = recognizer
         self.hostView.containerView.addGestureRecognizer(recognizer)
+        self.hostView.containerView.addSubview(self.badgeView)
+        self.hostView.containerView.addSubview(self.customProximityDimView)
     }
-    
+            
     public required init(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -647,6 +674,36 @@ public class Window1 {
         }
         if let voiceOverStatusObserver = self.voiceOverStatusObserver {
             NotificationCenter.default.removeObserver(voiceOverStatusObserver)
+        }
+    }
+    
+    private var forceBadgeHidden = true
+    public func setForceBadgeHidden(_ hidden: Bool) {
+        guard hidden != self.forceBadgeHidden else {
+            return
+        }
+        self.forceBadgeHidden = hidden
+        self.updateBadgeVisibility()
+    }
+    
+    public func setProximityDimHidden(_ hidden: Bool) {
+        guard hidden != self.customProximityDimView.isHidden else {
+            return
+        }
+        self.customProximityDimView.isHidden = hidden
+    }
+    
+    private func updateBadgeVisibility() {
+        let badgeIsHidden = !self.deviceMetrics.showAppBadge || self.forceBadgeHidden || self.windowLayout.size.width > self.windowLayout.size.height
+        if badgeIsHidden != self.badgeView.isHidden && !badgeIsHidden {
+            Queue.mainQueue().after(0.4) {
+                let badgeShouldBeHidden = !self.deviceMetrics.showAppBadge || self.forceBadgeHidden || self.windowLayout.size.width > self.windowLayout.size.height
+                if badgeShouldBeHidden == badgeIsHidden {
+                    self.badgeView.isHidden = badgeIsHidden
+                }
+            }
+        } else {
+            self.badgeView.isHidden = badgeIsHidden
         }
     }
     
@@ -828,7 +885,7 @@ public class Window1 {
                 if let coveringView = self.coveringView {
                     self.hostView.containerView.insertSubview(controller.view, belowSubview: coveringView)
                 } else {
-                    self.hostView.containerView.addSubview(controller.view)
+                    self.hostView.containerView.insertSubview(controller.view, belowSubview: self.badgeView)
                 }
                 
                 if let controller = controller as? ViewController {
@@ -868,7 +925,7 @@ public class Window1 {
                     if let controller = self.topPresentationContext.controllers.first {
                         self.hostView.containerView.insertSubview(coveringView, belowSubview: controller.0.displayNode.view)
                     } else {
-                        self.hostView.containerView.addSubview(coveringView)
+                        self.hostView.containerView.insertSubview(coveringView, belowSubview: self.badgeView)
                     }
                     if !self.windowLayout.size.width.isZero {
                         coveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
@@ -1087,6 +1144,13 @@ public class Window1 {
                     coveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
                     coveringView.updateLayout(self.windowLayout.size)
                 }
+                
+                if let image = self.badgeView.image {
+                    self.updateBadgeVisibility()
+                    self.badgeView.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((self.windowLayout.size.width - image.size.width) / 2.0), y: 5.0), size: image.size)
+                }
+                
+                self.customProximityDimView.frame = CGRect(origin: .zero, size: self.windowLayout.size)
             }
         }
     }

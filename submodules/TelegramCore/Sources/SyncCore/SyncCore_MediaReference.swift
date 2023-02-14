@@ -7,8 +7,16 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
         switch content {
             case .none:
                 return nil
-            case let .message(peer, _, _, _, _):
+            case let .message(peer, _, _, _, _, _):
                 return peer
+        }
+    }
+    public var author: PeerReference? {
+        switch content {
+            case .none:
+                return nil
+            case let .message(_, author, _, _, _, _):
+                return author
         }
     }
 
@@ -16,7 +24,7 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
         switch content {
         case .none:
             return nil
-        case let .message(_, id, _, _, _):
+        case let .message(_, _, id, _, _, _):
             return id
         }
     }
@@ -25,7 +33,7 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
         switch content {
             case .none:
                 return nil
-            case let .message(_, _, timestamp, _, _):
+            case let .message(_, _, _, timestamp, _, _):
                 return timestamp
         }
     }
@@ -34,7 +42,7 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
         switch content {
             case .none:
                 return nil
-            case let .message(_, _, _, incoming, _):
+            case let .message(_, _, _, _, incoming, _):
                 return incoming
         }
     }
@@ -43,22 +51,34 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
         switch content {
             case .none:
                 return nil
-            case let .message(_, _, _, _, secret):
+            case let .message(_, _, _, _, _, secret):
                 return secret
         }
     }
     
     public init(_ message: Message) {
         if message.id.namespace != Namespaces.Message.Local, let peer = message.peers[message.id.peerId], let inputPeer = PeerReference(peer) {
-            self.content = .message(peer: inputPeer, id: message.id, timestamp: message.timestamp, incoming: message.flags.contains(.Incoming), secret: message.containsSecretMedia)
+            let author: PeerReference?
+            if let peer = message.author {
+                author = PeerReference(peer)
+            } else {
+                author = nil
+            }
+            self.content = .message(peer: inputPeer, author: author, id: message.id, timestamp: message.timestamp, incoming: message.flags.contains(.Incoming), secret: message.containsSecretMedia)
         } else {
             self.content = .none
         }
     }
     
-    public init(peer: Peer, id: MessageId, timestamp: Int32, incoming: Bool, secret: Bool) {
+    public init(peer: Peer, author: Peer?, id: MessageId, timestamp: Int32, incoming: Bool, secret: Bool) {
         if let inputPeer = PeerReference(peer) {
-            self.content = .message(peer: inputPeer, id: id, timestamp: timestamp, incoming: incoming, secret: secret)
+            let a: PeerReference?
+            if let peer = author {
+                a = PeerReference(peer)
+            } else {
+                a = nil
+            }
+            self.content = .message(peer: inputPeer, author: a, id: id, timestamp: timestamp, incoming: incoming, secret: secret)
         } else {
             self.content = .none
         }
@@ -75,14 +95,14 @@ public struct MessageReference: PostboxCoding, Hashable, Equatable {
 
 public enum MessageReferenceContent: PostboxCoding, Hashable, Equatable {
     case none
-    case message(peer: PeerReference, id: MessageId, timestamp: Int32, incoming: Bool, secret: Bool)
+    case message(peer: PeerReference, author: PeerReference?, id: MessageId, timestamp: Int32, incoming: Bool, secret: Bool)
     
     public init(decoder: PostboxDecoder) {
         switch decoder.decodeInt32ForKey("_r", orElse: 0) {
             case 0:
                 self = .none
             case 1:
-                self = .message(peer: decoder.decodeObjectForKey("p", decoder: { PeerReference(decoder: $0) }) as! PeerReference, id: MessageId(peerId: PeerId(decoder.decodeInt64ForKey("i.p", orElse: 0)), namespace: decoder.decodeInt32ForKey("i.n", orElse: 0), id: decoder.decodeInt32ForKey("i.i", orElse: 0)), timestamp: 0, incoming: false, secret: false)
+            self = .message(peer: decoder.decodeObjectForKey("p", decoder: { PeerReference(decoder: $0) }) as! PeerReference, author: decoder.decodeObjectForKey("author") as? PeerReference, id: MessageId(peerId: PeerId(decoder.decodeInt64ForKey("i.p", orElse: 0)), namespace: decoder.decodeInt32ForKey("i.n", orElse: 0), id: decoder.decodeInt32ForKey("i.i", orElse: 0)), timestamp: 0, incoming: false, secret: false)
             default:
                 assertionFailure()
                 self = .none
@@ -93,9 +113,14 @@ public enum MessageReferenceContent: PostboxCoding, Hashable, Equatable {
         switch self {
             case .none:
                 encoder.encodeInt32(0, forKey: "_r")
-            case let .message(peer, id, _, _, _):
+            case let .message(peer, author, id, _, _, _):
                 encoder.encodeInt32(1, forKey: "_r")
                 encoder.encodeObject(peer, forKey: "p")
+                if let author = author {
+                    encoder.encodeObject(author, forKey: "author")
+                } else {
+                    encoder.encodeNil(forKey: "author")
+                }
                 encoder.encodeInt64(id.peerId.toInt64(), forKey: "i.p")
                 encoder.encodeInt32(id.namespace, forKey: "i.n")
                 encoder.encodeInt32(id.id, forKey: "i.i")
@@ -225,6 +250,7 @@ public enum AnyMediaReference: Equatable {
     case savedGif(media: Media)
     case avatarList(peer: PeerReference, media: Media)
     case attachBot(peer: PeerReference, media: Media)
+    case customEmoji(media: Media)
     
     public static func ==(lhs: AnyMediaReference, rhs: AnyMediaReference) -> Bool {
         switch lhs {
@@ -270,6 +296,12 @@ public enum AnyMediaReference: Equatable {
                 } else {
                     return false
                 }
+            case let .customEmoji(lhsMedia):
+                if case let .customEmoji(rhsMedia) = rhs, lhsMedia.isEqual(to: rhsMedia) {
+                    return true
+                } else {
+                    return false
+                }
         }
     }
     
@@ -288,6 +320,8 @@ public enum AnyMediaReference: Equatable {
             case .avatarList:
                 return nil
             case .attachBot:
+                return nil
+            case .customEmoji:
                 return nil
         }
     }
@@ -322,6 +356,10 @@ public enum AnyMediaReference: Equatable {
                 if let media = media as? T {
                     return .attachBot(peer: peer, media: media)
                 }
+            case let .customEmoji(media):
+                if let media = media as? T {
+                    return .customEmoji(media: media)
+                }
         }
         return nil
     }
@@ -341,6 +379,8 @@ public enum AnyMediaReference: Equatable {
             case let .avatarList(_, media):
                 return media
             case let .attachBot(_, media):
+                return media
+            case let .customEmoji(media):
                 return media
         }
     }
@@ -421,6 +461,7 @@ public enum MediaReference<T: Media> {
         case savedGif
         case avatarList
         case attachBot
+        case customEmoji
     }
     
     case standalone(media: T)
@@ -430,6 +471,7 @@ public enum MediaReference<T: Media> {
     case savedGif(media: T)
     case avatarList(peer: PeerReference, media: T)
     case attachBot(peer: PeerReference, media: T)
+    case customEmoji(media: T)
     
     public init?(decoder: PostboxDecoder) {
         guard let caseIdValue = decoder.decodeOptionalInt32ForKey("_r"), let caseId = CodingCase(rawValue: caseIdValue) else {
@@ -476,6 +518,11 @@ public enum MediaReference<T: Media> {
                     return nil
                 }
                 self = .attachBot(peer: peer, media: media)
+            case .customEmoji:
+                guard let media = decoder.decodeObjectForKey("m") as? T else {
+                    return nil
+                }
+                self = .customEmoji(media: media)
         }
     }
     
@@ -507,6 +554,9 @@ public enum MediaReference<T: Media> {
                 encoder.encodeInt32(CodingCase.attachBot.rawValue, forKey: "_r")
                 encoder.encodeObject(peer, forKey: "pr")
                 encoder.encodeObject(media, forKey: "m")
+            case let .customEmoji(media):
+                encoder.encodeInt32(CodingCase.customEmoji.rawValue, forKey: "_r")
+                encoder.encodeObject(media, forKey: "m")
         }
     }
     
@@ -526,6 +576,8 @@ public enum MediaReference<T: Media> {
                 return .avatarList(peer: peer, media: media)
             case let .attachBot(peer, media):
                 return .attachBot(peer: peer, media: media)
+            case let .customEmoji(media):
+                return .customEmoji(media: media)
         }
     }
     
@@ -548,6 +600,8 @@ public enum MediaReference<T: Media> {
             case let .avatarList(_, media):
                 return media
             case let .attachBot(_, media):
+                return media
+            case let .customEmoji(media):
                 return media
         }
     }

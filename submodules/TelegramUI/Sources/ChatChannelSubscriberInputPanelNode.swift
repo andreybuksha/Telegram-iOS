@@ -85,7 +85,11 @@ private func actionForPeer(peer: Peer, interfaceState: ChatPresentationInterface
                         if channel.flags.contains(.requestToJoin) {
                             return .applyToJoin
                         } else {
-                            return .joinGroup
+                            if channel.flags.contains(.isForum) {
+                                return .join
+                            } else {
+                                return .joinGroup
+                            }
                         }
                     } else {
                         return .join
@@ -252,7 +256,7 @@ final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
             break
         case .muteNotifications, .unmuteNotifications:
             if let context = self.context, let presentationInterfaceState = self.presentationInterfaceState, let peer = presentationInterfaceState.renderedPeer?.peer {
-                self.actionDisposable.set(context.engine.peers.togglePeerMuted(peerId: peer.id).start())
+                self.actionDisposable.set(context.engine.peers.togglePeerMuted(peerId: peer.id, threadId: nil).start())
             }
         case .hidePinnedMessages, .unpinMessages:
             self.interfaceInteraction?.unpinAllMessages()
@@ -265,7 +269,7 @@ final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
         }
     }
     
-    override func updateLayout(width: CGFloat, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, additionalSideInsets: UIEdgeInsets, maxHeight: CGFloat, isSecondary: Bool, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState, metrics: LayoutMetrics) -> CGFloat {
+    override func updateLayout(width: CGFloat, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, additionalSideInsets: UIEdgeInsets, maxHeight: CGFloat, isSecondary: Bool, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState, metrics: LayoutMetrics, isMediaInputExpanded: Bool) -> CGFloat {
         return self.updateLayout(width: width, leftInset: leftInset, rightInset: rightInset, bottomInset: bottomInset, additionalSideInsets: additionalSideInsets, maxHeight: maxHeight, isSecondary: isSecondary, transition: transition, interfaceState: interfaceState, metrics: metrics, force: false)
     }
     
@@ -308,6 +312,7 @@ final class ChatChannelSubscriberInputPanelNode: ChatInputPanelNode {
                     }
                     
                     self.button.setTitle(title, with: Font.regular(17.0), with: color, for: [])
+                    self.button.accessibilityLabel = title
                 } else {
                     self.action = nil
                 }

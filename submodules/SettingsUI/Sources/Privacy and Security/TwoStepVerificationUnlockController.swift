@@ -206,7 +206,7 @@ private func twoStepVerificationUnlockSettingsControllerEntries(presentationData
                         if let pendingEmail = pendingEmail {
                             entries.append(.pendingEmailConfirmInfo(presentationData.theme, presentationData.strings.TwoStepAuth_SetupPendingEmail(pendingEmail.email.pattern).string))
                             entries.append(.pendingEmailConfirmCode(presentationData.theme, presentationData.strings, presentationData.strings.TwoStepAuth_RecoveryCode, state.emailCode))
-                             entries.append(.pendingEmailInfo(presentationData.theme, "[" + presentationData.strings.TwoStepAuth_ConfirmationAbort + "]()"))
+                            entries.append(.pendingEmailInfo(presentationData.theme, "[" + presentationData.strings.TwoStepAuth_ConfirmationAbort + "]()"))
                             
                             /*entries.append(.pendingEmailInfo(presentationData.theme, presentationData.strings.TwoStepAuth_ConfirmationText + "\n\n\(pendingEmailAndValue.pendingEmail.pattern)\n\n[" + presentationData.strings.TwoStepAuth_ConfirmationAbort + "]()"))*/
                         } else {
@@ -226,7 +226,7 @@ private func twoStepVerificationUnlockSettingsControllerEntries(presentationData
                             if remainingSeconds <= 0 {
                                 text += "[" + presentationData.strings.TwoStepAuth_ResetAction + "](reset)"
                             } else {
-                                text.append(presentationData.strings.TwoStepAuth_ResetPendingText(timeIntervalString(strings: presentationData.strings, value: remainingSeconds)).string)
+                                text.append(presentationData.strings.TwoStepAuth_ResetPendingText(timeIntervalString(strings: presentationData.strings, value: remainingSeconds, usage: .afterTime)).string)
                                 text.append("\n[\(presentationData.strings.TwoStepAuth_CancelResetTitle)](declineReset)")
                             }
                         } else {

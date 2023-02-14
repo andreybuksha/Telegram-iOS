@@ -13,6 +13,12 @@ import PasscodeInputFieldNode
 import MonotonicTime
 import GradientBackground
 
+private extension CGRect {
+    var center: CGPoint {
+        return CGPoint(x: self.midX, y: self.midY)
+    }
+}
+
 private let titleFont = Font.regular(20.0)
 private let subtitleFont = Font.regular(15.0)
 private let buttonFont = Font.regular(17.0)
@@ -119,8 +125,12 @@ final class PasscodeEntryControllerNode: ASDisplayNode {
         }
         
         self.cancelButtonNode.setTitle(strings.Common_Cancel, with: buttonFont, with: .white, for: .normal)
+        self.cancelButtonNode.accessibilityLabel = strings.Common_Cancel
+        self.cancelButtonNode.accessibilityTraits = [.button]
         self.deleteButtonNode.setTitle(strings.Common_Delete, with: buttonFont, with: .white, for: .normal)
-    
+        self.deleteButtonNode.accessibilityLabel = strings.Common_Delete
+        self.deleteButtonNode.accessibilityTraits = [.button]
+        
         if let biometricsType = self.biometricsType {
             switch biometricsType {
                 case .touchId:

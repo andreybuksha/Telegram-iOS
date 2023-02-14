@@ -1,7 +1,7 @@
 import Foundation
 import Postbox
 import SwiftSignalKit
-
+import TelegramApi
 
 extension MediaResourceReference {
     var apiFileReference: Data? {
@@ -25,11 +25,62 @@ final class TelegramCloudMediaResourceFetchInfo: MediaResourceFetchInfo {
     }
 }
 
-public func fetchedMediaResource(mediaBox: MediaBox, reference: MediaResourceReference, range: (Range<Int64>, MediaBoxFetchPriority)? = nil, statsCategory: MediaResourceStatsCategory = .generic, reportResultStatus: Bool = false, preferBackgroundReferenceRevalidation: Bool = false, continueInBackground: Bool = false) -> Signal<FetchResourceSourceType, FetchResourceError> {
-    return fetchedMediaResource(mediaBox: mediaBox, reference: reference, ranges: range.flatMap({ [$0] }), statsCategory: statsCategory, reportResultStatus: reportResultStatus, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground)
+public func fetchedMediaResource(
+    mediaBox: MediaBox,
+    userLocation: MediaResourceUserLocation,
+    userContentType: MediaResourceUserContentType,
+    reference: MediaResourceReference,
+    range: (Range<Int64>, MediaBoxFetchPriority)? = nil,
+    statsCategory: MediaResourceStatsCategory = .generic,
+    reportResultStatus: Bool = false,
+    preferBackgroundReferenceRevalidation: Bool = false,
+    continueInBackground: Bool = false
+) -> Signal<FetchResourceSourceType, FetchResourceError> {
+    return fetchedMediaResource(mediaBox: mediaBox, userLocation: userLocation, userContentType: userContentType, reference: reference, ranges: range.flatMap({ [$0] }), statsCategory: statsCategory, reportResultStatus: reportResultStatus, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground)
 }
 
-public func fetchedMediaResource(mediaBox: MediaBox, reference: MediaResourceReference, ranges: [(Range<Int64>, MediaBoxFetchPriority)]?, statsCategory: MediaResourceStatsCategory = .generic, reportResultStatus: Bool = false, preferBackgroundReferenceRevalidation: Bool = false, continueInBackground: Bool = false) -> Signal<FetchResourceSourceType, FetchResourceError> {
+public extension MediaResourceStorageLocation {
+    convenience init?(userLocation: MediaResourceUserLocation, reference: MediaResourceReference) {
+        switch reference {
+        case let .media(media, _):
+            switch media {
+            case let .message(message, _):
+                if let id = message.id {
+                    self.init(peerId: id.peerId, messageId: id)
+                    return
+                }
+            default:
+                break
+            }
+        default:
+            break
+        }
+        
+        switch userLocation {
+        case let .peer(id):
+            self.init(peerId: id, messageId: nil)
+        case .other:
+            return nil
+        }
+    }
+}
+
+public enum MediaResourceUserLocation: Equatable {
+    case peer(EnginePeer.Id)
+    case other
+}
+
+public func fetchedMediaResource(
+    mediaBox: MediaBox,
+    userLocation: MediaResourceUserLocation,
+    userContentType: MediaResourceUserContentType,
+    reference: MediaResourceReference,
+    ranges: [(Range<Int64>, MediaBoxFetchPriority)]?,
+    statsCategory: MediaResourceStatsCategory = .generic,
+    reportResultStatus: Bool = false,
+    preferBackgroundReferenceRevalidation: Bool = false,
+    continueInBackground: Bool = false
+) -> Signal<FetchResourceSourceType, FetchResourceError> {
     var isRandomAccessAllowed = true
     switch reference {
     case let .media(media, _):
@@ -42,16 +93,36 @@ public func fetchedMediaResource(mediaBox: MediaBox, reference: MediaResourceRef
         break
     }
     
+    let location = MediaResourceStorageLocation(userLocation: userLocation, reference: reference)
+    
+    var ranges = ranges
+    
+    if let rangesValue = ranges, rangesValue.count == 1, rangesValue[0].0 == 0 ..< Int64.max {
+        ranges = nil
+    }
+    
     if let ranges = ranges {
         let signals = ranges.map { (range, priority) -> Signal<Void, FetchResourceError> in
-            return mediaBox.fetchedResourceData(reference.resource, in: range, priority: priority, parameters: MediaResourceFetchParameters(tag: TelegramMediaResourceFetchTag(statsCategory: statsCategory), info: TelegramCloudMediaResourceFetchInfo(reference: reference, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground), isRandomAccessAllowed: isRandomAccessAllowed))
+            return mediaBox.fetchedResourceData(reference.resource, in: range, priority: priority, parameters: MediaResourceFetchParameters(
+                tag: TelegramMediaResourceFetchTag(statsCategory: statsCategory, userContentType: userContentType),
+                info: TelegramCloudMediaResourceFetchInfo(reference: reference, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground),
+                location: location,
+                contentType: userContentType,
+                isRandomAccessAllowed: isRandomAccessAllowed
+            ))
         }
         return combineLatest(signals)
         |> ignoreValues
         |> map { _ -> FetchResourceSourceType in }
         |> then(.single(.local))
     } else {
-        return mediaBox.fetchedResource(reference.resource, parameters: MediaResourceFetchParameters(tag: TelegramMediaResourceFetchTag(statsCategory: statsCategory), info: TelegramCloudMediaResourceFetchInfo(reference: reference, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground), isRandomAccessAllowed: isRandomAccessAllowed), implNext: reportResultStatus)
+        return mediaBox.fetchedResource(reference.resource, parameters: MediaResourceFetchParameters(
+            tag: TelegramMediaResourceFetchTag(statsCategory: statsCategory, userContentType: userContentType),
+            info: TelegramCloudMediaResourceFetchInfo(reference: reference, preferBackgroundReferenceRevalidation: preferBackgroundReferenceRevalidation, continueInBackground: continueInBackground),
+            location: location,
+            contentType: userContentType,
+            isRandomAccessAllowed: isRandomAccessAllowed
+        ), implNext: reportResultStatus)
     }
 }
 
@@ -135,6 +206,10 @@ private func findMediaResource(media: Media, previousMedia: Media?, resource: Me
                 if let image = image, let result = findMediaResource(media: image, previousMedia: previousMedia, resource: resource) {
                     return result
                 }
+            case let .suggestedProfilePhoto(image):
+                if let image = image, let result = findMediaResource(media: image, previousMedia: previousMedia, resource: resource) {
+                    return result
+                }
             default:
                 break
         }
@@ -200,6 +275,10 @@ func findMediaResourceById(media: Media, resourceId: MediaResourceId) -> Telegra
             if let image = image, let result = findMediaResourceById(media: image, resourceId: resourceId) {
                 return result
             }
+        case let .suggestedProfilePhoto(image):
+            if let image = image, let result = findMediaResourceById(media: image, resourceId: resourceId) {
+                return result
+            }
         default:
             break
         }
@@ -227,6 +306,7 @@ private enum MediaReferenceRevalidationKey: Hashable {
     case peerAvatars(peer: PeerReference)
     case attachBot(peer: PeerReference)
     case notificationSoundList
+    case customEmoji(fileId: Int64)
 }
 
 private final class MediaReferenceRevalidationItemContext {
@@ -388,6 +468,26 @@ final class MediaReferenceRevalidationContext {
             } else {
                 return .fail(.generic)
             }
+        }
+    }
+    
+    func customEmoji(postbox: Postbox, network: Network, background: Bool, fileId: Int64) -> Signal<TelegramMediaFile, RevalidateMediaReferenceError> {
+        return network.request(Api.functions.messages.getCustomEmojiDocuments(documentId: [fileId]))
+        |> map(Optional.init)
+        |> `catch` { _ -> Signal<[Api.Document]?, NoError> in
+            return .single(nil)
+        }
+        |> castError(RevalidateMediaReferenceError.self)
+        |> mapToSignal { result -> Signal<TelegramMediaFile, RevalidateMediaReferenceError> in
+            guard let result = result else {
+                return .fail(.generic)
+            }
+            for document in result {
+                if let file = telegramMediaFileFromApiDocument(document) {
+                    return .single(file)
+                }
+            }
+            return .fail(.generic)
         }
     }
     
@@ -726,7 +826,37 @@ func revalidateMediaResourceReference(postbox: Postbox, network: Network, revali
                         }
                     }
                     return .fail(.generic)
-            }
+                case let .customEmoji(media):
+                    if let file = media as? TelegramMediaFile {
+                        return revalidationContext.customEmoji(postbox: postbox, network: network, background: info.preferBackgroundReferenceRevalidation, fileId: file.fileId.id)
+                        |> mapToSignal { result -> Signal<RevalidatedMediaResource, RevalidateMediaReferenceError> in
+                            if let updatedResource = findUpdatedMediaResource(media: result, previousMedia: media, resource: resource) {
+                                return postbox.transaction { transaction -> RevalidatedMediaResource in
+                                    if let id = media.id {
+                                        var attributes = result.attributes
+                                        if !attributes.contains(where: { attribute in
+                                            if case .hintIsValidated = attribute {
+                                                return true
+                                            } else {
+                                                return false
+                                            }
+                                        }) {
+                                            attributes.append(.hintIsValidated)
+                                        }
+                                        let file = result.withUpdatedAttributes(attributes)
+                                        updateMessageMedia(transaction: transaction, id: id, media: file)
+                                    }
+                                    return RevalidatedMediaResource(updatedResource: updatedResource, updatedReference: nil)
+                                }
+                                |> castError(RevalidateMediaReferenceError.self)
+                            } else {
+                                return .fail(.generic)
+                            }
+                        }
+                    } else {
+                        return .fail(.generic)
+                    }
+                }
         case let .avatar(peer, _):
             return revalidationContext.peer(postbox: postbox, network: network, background: info.preferBackgroundReferenceRevalidation, peer: peer)
             |> mapToSignal { updatedPeer -> Signal<RevalidatedMediaResource, RevalidateMediaReferenceError> in

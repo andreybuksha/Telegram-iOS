@@ -34,6 +34,10 @@ import DebugSettingsUI
 import BackgroundTasks
 import UIKitRuntimeUtils
 import StoreKit
+import PhoneNumberFormat
+import AuthorizationUI
+import ManagedFile
+import DeviceProximity
 
 #if canImport(AppCenter)
 import AppCenter
@@ -110,6 +114,10 @@ private class ApplicationStatusBarHost: StatusBarHost {
     }
     
     var keyboardWindow: UIWindow? {
+        if #available(iOS 16.0, *) {
+            return UIApplication.shared.internalGetKeyboard()
+        }
+        
         for window in UIApplication.shared.windows {
             if isKeyboardWindow(window: window) {
                 return window
@@ -204,7 +212,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     )
 }
 
-@objc(AppDelegate) class AppDelegate: UIResponder, UIApplicationDelegate, PKPushRegistryDelegate, UNUserNotificationCenterDelegate {
+@objc(AppDelegate) class AppDelegate: UIResponder, UIApplicationDelegate, PKPushRegistryDelegate, UNUserNotificationCenterDelegate, URLSessionDelegate, URLSessionTaskDelegate {
     @objc var window: UIWindow?
     var nativeWindow: (UIWindow & WindowHost)?
     var mainWindow: Window1!
@@ -252,6 +260,34 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     private var _notificationTokenPromise: Promise<Data>?
     private let voipTokenPromise = Promise<Data>()
     
+    private var firebaseSecrets: [String: String] = [:] {
+        didSet {
+            if self.firebaseSecrets != oldValue {
+                self.firebaseSecretStream.set(.single(self.firebaseSecrets))
+            }
+        }
+    }
+    private let firebaseSecretStream = Promise<[String: String]>([:])
+    
+    private var urlSessions: [URLSession] = []
+    private func urlSession(identifier: String) -> URLSession {
+        if let existingSession = self.urlSessions.first(where: { $0.configuration.identifier == identifier }) {
+            return existingSession
+        }
+        
+        let baseAppBundleId = Bundle.main.bundleIdentifier!
+        let appGroupName = "group.\(baseAppBundleId)"
+
+        let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+        configuration.sharedContainerIdentifier = appGroupName
+        configuration.isDiscretionary = false
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
+        self.urlSessions.append(session)
+        return session
+    }
+    
+    private var pendingUrlSessionBackgroundEventsCompletion: (() -> Void)?
+    
     private var notificationTokenPromise: Promise<Data> {
         if let current = self._notificationTokenPromise {
             return current
@@ -270,7 +306,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     private var alertActions: (primary: (() -> Void)?, other: (() -> Void)?)?
     
     private let deviceToken = Promise<Data?>(nil)
-    
+        
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         precondition(!testIsLaunched)
         testIsLaunched = true
@@ -474,7 +510,6 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         TempBox.initializeShared(basePath: rootPath, processType: "app", launchSpecificId: Int64.random(in: Int64.min ... Int64.max))
         
         let legacyLogs: [String] = [
-            "logs",
             "broadcast-logs",
             "siri-logs",
             "widget-logs",
@@ -524,7 +559,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }, canOpenUrl: { url in
             return UIApplication.shared.canOpenURL(url)
         }, openUrl: { url in
-            UIApplication.shared.openURL(url)
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
         })
         
         if #available(iOS 10.0, *) {
@@ -550,9 +585,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
             
             if let parsedUrl = parsedUrl {
-                UIApplication.shared.openURL(parsedUrl)
+                UIApplication.shared.open(parsedUrl, options: [:], completionHandler: nil)
             } else if let escapedUrl = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed), let parsedUrl = URL(string: escapedUrl) {
-                UIApplication.shared.openURL(parsedUrl)
+                UIApplication.shared.open(parsedUrl, options: [:], completionHandler: nil)
             }
         }, openUniversalUrl: { url, completion in
             if #available(iOS 10.0, *) {
@@ -628,12 +663,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             return disposable
         }, openSettings: {
             if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.openURL(url)
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }, openAppStorePage: {
             let appStoreId = buildConfig.appStoreId
             if let url = URL(string: "itms-apps://itunes.apple.com/app/id\(appStoreId)") {
-                UIApplication.shared.openURL(url)
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }, openSubscriptions: {
             if #available(iOS 15, *), let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -641,13 +676,15 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     try await AppStore.showManageSubscriptions(in: scene)
                 }
             } else if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                UIApplication.shared.openURL(url)
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }, registerForNotifications: { completion in
+            Logger.shared.log("App \(self.episodeId)", "register for notifications begin")
             let _ = (self.context.get()
             |> take(1)
             |> deliverOnMainQueue).start(next: { context in
                 if let context = context {
+                    Logger.shared.log("App \(self.episodeId)", "register for notifications initiate")
                     self.registerForNotifications(context: context.context, authorize: true, completion: completion)
                 }
             })
@@ -727,8 +764,28 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
         }, forceOrientation: { orientation in
             let value = orientation.rawValue
-            UIDevice.current.setValue(value, forKey: "orientation")
-            UINavigationController.attemptRotationToDeviceOrientation()
+            if #available(iOSApplicationExtension 16.0, iOS 16.0, *) {
+                let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+                var interfaceOrientations: UIInterfaceOrientationMask = []
+                switch orientation {
+                case .portrait:
+                    interfaceOrientations = .portrait
+                case .landscapeLeft:
+                    interfaceOrientations = .landscapeLeft
+                case .landscapeRight:
+                    interfaceOrientations = .landscapeRight
+                case .portraitUpsideDown:
+                    interfaceOrientations = .portraitUpsideDown
+                case .unknown:
+                    interfaceOrientations = .portrait
+                @unknown default:
+                    interfaceOrientations = .portrait
+                }
+                windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: interfaceOrientations))
+            } else {
+                UIDevice.current.setValue(value, forKey: "orientation")
+                UINavigationController.attemptRotationToDeviceOrientation()
+            }
         })
         
         let accountManager = AccountManager<TelegramAccountManagerTypes>(basePath: rootPath + "/accounts-metadata", isTemporary: false, isReadOnly: false, useCaches: true, removeDatabaseOnError: true)
@@ -773,10 +830,10 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             })
             
             var setPresentationCall: ((PresentationCall?) -> Void)?
-            let sharedContext = SharedAccountContextImpl(mainWindow: self.mainWindow, sharedContainerPath: legacyBasePath, basePath: rootPath, encryptionParameters: encryptionParameters, accountManager: accountManager, appLockContext: appLockContext, applicationBindings: applicationBindings, initialPresentationDataAndSettings: initialPresentationDataAndSettings, networkArguments: networkArguments, premiumProductId: buildConfig.premiumIAPProductId, rootPath: rootPath, legacyBasePath: legacyBasePath, apsNotificationToken: self.notificationTokenPromise.get() |> map(Optional.init), voipNotificationToken: self.voipTokenPromise.get() |> map(Optional.init), setNotificationCall: { call in
+            let sharedContext = SharedAccountContextImpl(mainWindow: self.mainWindow, sharedContainerPath: legacyBasePath, basePath: rootPath, encryptionParameters: encryptionParameters, accountManager: accountManager, appLockContext: appLockContext, applicationBindings: applicationBindings, initialPresentationDataAndSettings: initialPresentationDataAndSettings, networkArguments: networkArguments, hasInAppPurchases: buildConfig.isAppStoreBuild && buildConfig.apiId == 1, rootPath: rootPath, legacyBasePath: legacyBasePath, apsNotificationToken: self.notificationTokenPromise.get() |> map(Optional.init), voipNotificationToken: self.voipTokenPromise.get() |> map(Optional.init), firebaseSecretStream: self.firebaseSecretStream.get(), setNotificationCall: { call in
                 setPresentationCall?(call)
             }, navigateToChat: { accountId, peerId, messageId in
-                self.openChatWhenReady(accountId: accountId, peerId: peerId, messageId: messageId)
+                self.openChatWhenReady(accountId: accountId, peerId: peerId, threadId: nil, messageId: messageId)
             }, displayUpgradeProgress: { progress in
                 if let progress = progress {
                     if self.dataImportSplash == nil {
@@ -793,7 +850,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         self.mainWindow.coveringView = nil
                     }
                 }
-            })
+            }, appDelegate: self)
             
             presentationDataPromise.set(sharedContext.presentationData)
             
@@ -878,7 +935,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     return .single(nil)
                 }
             }
-            let wakeupManager = SharedWakeupManager(beginBackgroundTask: { name, expiration in application.beginBackgroundTask(withName: name, expirationHandler: expiration) }, endBackgroundTask: { id in application.endBackgroundTask(id) }, backgroundTimeRemaining: { application.backgroundTimeRemaining }, activeAccounts: sharedContext.activeAccountContexts |> map { ($0.0?.account, $0.1.map { ($0.0, $0.1.account) }) }, liveLocationPolling: liveLocationPolling, watchTasks: watchTasks, inForeground: applicationBindings.applicationInForeground, hasActiveAudioSession: self.hasActiveAudioSession.get(), notificationManager: notificationManager, mediaManager: sharedContext.mediaManager, callManager: sharedContext.callManager, accountUserInterfaceInUse: { id in
+            let wakeupManager = SharedWakeupManager(beginBackgroundTask: { name, expiration in application.beginBackgroundTask(withName: name, expirationHandler: expiration) }, endBackgroundTask: { id in application.endBackgroundTask(id) }, backgroundTimeRemaining: { application.backgroundTimeRemaining }, acquireIdleExtension: {
+                return applicationBindings.pushIdleTimerExtension()
+            }, activeAccounts: sharedContext.activeAccountContexts |> map { ($0.0?.account, $0.1.map { ($0.0, $0.1.account) }) }, liveLocationPolling: liveLocationPolling, watchTasks: watchTasks, inForeground: applicationBindings.applicationInForeground, hasActiveAudioSession: self.hasActiveAudioSession.get(), notificationManager: notificationManager, mediaManager: sharedContext.mediaManager, callManager: sharedContext.callManager, accountUserInterfaceInUse: { id in
                 return sharedContext.accountUserInterfaceInUse(id)
             })
             let sharedApplicationContext = SharedApplicationContext(sharedContext: sharedContext, notificationManager: notificationManager, wakeupManager: wakeupManager)
@@ -1038,8 +1097,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     print("Launch to ready took \((CFAbsoluteTimeGetCurrent() - launchStartTime) * 1000.0) ms")
 
                     self.mainWindow.debugAction = nil
-                    
                     self.mainWindow.viewController = context.rootController
+                    
                     if firstTime {
                         let layer = context.rootController.view.layer
                         layer.allowsGroupOpacity = true
@@ -1105,8 +1164,10 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     |> take(1)
                     |> timeout(4.0, queue: .mainQueue(), alternate: .complete())
                     |> deliverOnMainQueue).start(completed: {
-                        authContextValue.rootController.view.endEditing(true)
-                        authContextValue.rootController.dismiss()
+                        Queue.mainQueue().after(0.75) {
+                            authContextValue.rootController.view.endEditing(true)
+                            authContextValue.rootController.dismiss()
+                        }
                     })
                 } else {
                     authContextValue.rootController.view.endEditing(true)
@@ -1116,14 +1177,26 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             self.authContextValue = context
             if let context = context {
                 let presentationData = context.sharedContext.currentPresentationData.with({ $0 })
-                let statusController = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: nil))
-                self.mainWindow.present(statusController, on: .root)
+                
+                let progressSignal = Signal<Never, NoError> { [weak self] subscriber in
+                    let statusController = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: nil))
+                    self?.mainWindow.present(statusController, on: .root)
+                    return ActionDisposable { [weak statusController] in
+                        Queue.mainQueue().async() {
+                            statusController?.dismiss()
+                        }
+                    }
+                }
+                |> runOn(Queue.mainQueue())
+                |> delay(0.5, queue: Queue.mainQueue())
+                let progressDisposable = progressSignal.start()
+                
                 let isReady: Signal<Bool, NoError> = context.isReady.get()
                 authContextReadyDisposable.set((isReady
                 |> filter { $0 }
                 |> take(1)
                 |> deliverOnMainQueue).start(next: { _ in
-                    statusController.dismiss()
+                    progressDisposable.dispose()
                     self.mainWindow.present(context.rootController, on: .root)
                 }))
             } else {
@@ -1235,6 +1308,17 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             self.isInForegroundPromise.set(true)
             self.isActiveValue = true
             self.isActivePromise.set(true)
+            
+            SharedDisplayLinkDriver.shared.updateForegroundState(self.isActiveValue)
+            
+            self.runForegroundTasks()
+        }
+        
+        
+        DeviceProximityManager.shared().proximityChanged = { [weak self] value in
+            if let strongSelf = self {
+                strongSelf.mainWindow.setProximityDimHidden(!value)
+            }
         }
         
         if UIApplication.shared.isStatusBarHidden {
@@ -1272,7 +1356,229 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         #endif
         
+        if #available(iOS 13.0, *) {
+            let taskId = "\(baseAppBundleId).cleanup"
+            
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: taskId, using: DispatchQueue.main) { task in
+                Logger.shared.log("App \(self.episodeId)", "Executing cleanup task")
+                
+                let disposable = self.runCacheReindexTasks(lowImpact: true, completion: {
+                    Logger.shared.log("App \(self.episodeId)", "Completed cleanup task")
+                    
+                    task.setTaskCompleted(success: true)
+                })
+                
+                task.expirationHandler = {
+                    disposable.dispose()
+                    task.setTaskCompleted(success: false)
+                }
+            }
+            
+            BGTaskScheduler.shared.getPendingTaskRequests(completionHandler: { tasks in
+                if tasks.contains(where: { $0.identifier == taskId }) {
+                    Logger.shared.log("App \(self.episodeId)", "Already have a cleanup task pending")
+                    return
+                }
+                let request = BGProcessingTaskRequest(identifier: taskId)
+                request.requiresExternalPower = true
+                request.requiresNetworkConnectivity = false
+                
+                do {
+                    try BGTaskScheduler.shared.submit(request)
+                } catch let e {
+                    Logger.shared.log("App \(self.episodeId)", "Error submitting background task request: \(e)")
+                }
+            })
+        }
+        
+        /*let timestamp = Int(CFAbsoluteTimeGetCurrent())
+        let minReindexTimestamp = timestamp - 2 * 24 * 60 * 60
+        if let indexTimestamp = UserDefaults.standard.object(forKey: "TelegramCacheIndexTimestamp") as? NSNumber, indexTimestamp.intValue >= minReindexTimestamp {
+        } else {
+            UserDefaults.standard.set(timestamp as NSNumber, forKey: "TelegramCacheIndexTimestamp")
+            
+            Logger.shared.log("App \(self.episodeId)", "Executing low-impact cache reindex in foreground")
+            let _ = self.runCacheReindexTasks(lowImpact: true, completion: {
+                Logger.shared.log("App \(self.episodeId)", "Executing low-impact cache reindex in foreground — done")
+            })
+        }*/
+        
+        if #available(iOS 12.0, *) {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        
+        let _ = self.urlSession(identifier: "\(baseAppBundleId).backroundSession")
+        
         return true
+    }
+    
+    private var backgroundSessionSourceDataDisposables: [String: Disposable] = [:]
+    private var backgroundUploadResultSubscribers: [String: Bag<(String?) -> Void>] = [:]
+    
+    func uploadInBackround(postbox: Postbox, resource: MediaResource) -> Signal<String?, NoError> {
+        let baseAppBundleId = Bundle.main.bundleIdentifier!
+        let session = self.urlSession(identifier: "\(baseAppBundleId).backroundSession")
+        
+        let signal = Signal<Never, NoError> { subscriber in
+            let disposable = MetaDisposable()
+            
+            let _ = session.getAllTasks(completionHandler: { tasks in
+                var alreadyExists = false
+                for task in tasks {
+                    if let originalRequest = task.originalRequest {
+                        if let requestResourceId = originalRequest.value(forHTTPHeaderField: "tresource") {
+                            if resource.id.stringRepresentation == requestResourceId {
+                                alreadyExists = true
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                if !alreadyExists, self.backgroundSessionSourceDataDisposables[resource.id.stringRepresentation] == nil {
+                    self.backgroundSessionSourceDataDisposables[resource.id.stringRepresentation] = (Signal<Never, NoError> { subscriber in
+                        let dataDisposable = (postbox.mediaBox.resourceData(resource)
+                        |> deliverOnMainQueue).start(next: { data in
+                            if data.complete {
+                                self.addBackgroundUploadTask(id: resource.id.stringRepresentation, path: data.path)
+                            }
+                        })
+                        let fetchDisposable = postbox.mediaBox.fetchedResource(resource, parameters: nil).start()
+                        
+                        return ActionDisposable {
+                            dataDisposable.dispose()
+                            fetchDisposable.dispose()
+                        }
+                    }).start()
+                }
+            })
+            
+            return disposable
+        }
+        |> runOn(.mainQueue())
+        
+        return Signal { subscriber in
+            let bag: Bag<(String?) -> Void>
+            if let current = self.backgroundUploadResultSubscribers[resource.id.stringRepresentation] {
+                bag = current
+            } else {
+                bag = Bag()
+                self.backgroundUploadResultSubscribers[resource.id.stringRepresentation] = bag
+            }
+            let index = bag.add { result in
+                subscriber.putNext(result)
+                subscriber.putCompletion()
+            }
+            
+            let workDisposable = signal.start()
+            
+            return ActionDisposable {
+                workDisposable.dispose()
+                
+                Queue.mainQueue().async {
+                    if let bag = self.backgroundUploadResultSubscribers[resource.id.stringRepresentation] {
+                        bag.remove(index)
+                        if bag.isEmpty {
+                            //TODO:cancel tasks
+                        }
+                    }
+                }
+            }
+        }
+        |> runOn(.mainQueue())
+    }
+    
+    private func addBackgroundUploadTask(id: String, path: String) {
+        let baseAppBundleId = Bundle.main.bundleIdentifier!
+        let session = self.urlSession(identifier: "\(baseAppBundleId).backroundSession")
+        
+        let fileName = "upload-\(UInt32.random(in: 0 ... UInt32.max))"
+        let uploadFilePath = NSTemporaryDirectory() + "/" + fileName
+        guard let sourceFile = ManagedFile(queue: nil, path: uploadFilePath, mode: .readwrite) else {
+            return
+        }
+        guard let inFile = ManagedFile(queue: nil, path: path, mode: .read) else {
+            return
+        }
+        
+        let boundary = UUID().uuidString
+        
+        var headerData = Data()
+        headerData.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
+        headerData.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        headerData.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
+        
+        var footerData = Data()
+        footerData.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        let _ = sourceFile.write(headerData)
+        
+        let bufferSize = 512 * 1024
+        let buffer = malloc(bufferSize)!
+        defer {
+            free(buffer)
+        }
+        
+        while true {
+            let readBytes = inFile.read(buffer, bufferSize)
+            if readBytes <= 0 {
+                break
+            } else {
+                let _ = sourceFile.write(buffer, count: readBytes)
+            }
+        }
+        
+        let _ = sourceFile.write(footerData)
+        
+        sourceFile._unsafeClose()
+        inFile._unsafeClose()
+        
+        var request = URLRequest(url: URL(string: "http://localhost:25478/upload?token=f9403fc5f537b4ab332d")!)
+        request.httpMethod = "POST"
+        
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(id, forHTTPHeaderField: "tresource")
+        
+        let task = session.uploadTask(with: request, fromFile: URL(fileURLWithPath: uploadFilePath))
+        task.resume()
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let response = task.response as? HTTPURLResponse {
+            if let originalRequest = task.originalRequest {
+                if let requestResourceId = originalRequest.value(forHTTPHeaderField: "tresource") {
+                    if let bag = self.backgroundUploadResultSubscribers[requestResourceId] {
+                        for item in bag.copyItems() {
+                            item("http server: \(response.allHeaderFields)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func runCacheReindexTasks(lowImpact: Bool, completion: @escaping () -> Void) -> Disposable {
+        let disposable = MetaDisposable()
+        
+        let _ = (self.sharedContextPromise.get()
+        |> take(1)
+        |> deliverOnMainQueue).start(next: { sharedApplicationContext in
+            let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+            |> take(1)
+            |> deliverOnMainQueue).start(next: { activeAccounts in
+                var signals: Signal<Never, NoError> = .complete()
+                
+                for (_, context, _) in activeAccounts.accounts {
+                    signals = signals |> then(context.account.cleanupTasks(lowImpact: lowImpact))
+                }
+                
+                disposable.set(signals.start(completed: {
+                    completion()
+                }))
+            })
+        })
+        
+        return disposable
     }
 
     private func resetBadge() {
@@ -1369,6 +1675,24 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 }
             }
         }
+        
+        self.runForegroundTasks()
+        
+        SharedDisplayLinkDriver.shared.updateForegroundState(self.isActiveValue)
+    }
+    
+    func runForegroundTasks() {
+        let _ = (self.sharedContextPromise.get()
+        |> take(1)
+        |> deliverOnMainQueue).start(next: { sharedApplicationContext in
+            let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+             |> take(1)
+             |> deliverOnMainQueue).start(next: { activeAccounts in
+                for (_, context, _) in activeAccounts.accounts {
+                    (context.downloadedMediaStoreManager as? DownloadedMediaStoreManagerImpl)?.runTasks()
+                }
+            })
+        })
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
@@ -1380,6 +1704,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         self.resetBadge()
         
         self.maybeCheckForUpdates()
+        
+        SharedDisplayLinkDriver.shared.updateForegroundState(self.isActiveValue)
     }
     
     func applicationWillTerminate(_ application: UIApplication) {
@@ -1387,7 +1713,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     }
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Logger.shared.log("App \(self.episodeId)", "register for notifications: didRegisterForRemoteNotificationsWithDeviceToken (deviceToken: \(deviceToken))")
         self.notificationTokenPromise.set(.single(deviceToken))
+    }
+    
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        Logger.shared.log("App \(self.episodeId)", "register for notifications: didFailToRegisterForRemoteNotificationsWithError (error: \(error))")
     }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -1411,6 +1742,26 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         
         Logger.shared.log("App \(self.episodeId)", "remoteNotification: \(redactedPayload)")
+        
+        if let firebaseAuth = redactedPayload["com.google.firebase.auth"] as? String {
+            guard let firebaseAuthData = firebaseAuth.data(using: .utf8), let firebaseJson = try? JSONSerialization.jsonObject(with: firebaseAuthData) else {
+                completionHandler(.newData)
+                return
+            }
+            guard let firebaseDict = firebaseJson as? [String: Any] else {
+                completionHandler(.newData)
+                return
+            }
+            
+            if let receipt = firebaseDict["receipt"] as? String, let secret = firebaseDict["secret"] as? String {
+                var firebaseSecrets = self.firebaseSecrets
+                firebaseSecrets[receipt] = secret
+                self.firebaseSecrets = firebaseSecrets
+            }
+            
+            completionHandler(.newData)
+            return
+        }
 
         if userInfo["p"] == nil {
             completionHandler(.noData)
@@ -1427,11 +1778,11 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         })
     }
     
-    func application(_ application: UIApplication, didReceive notification: UILocalNotification) {
+    /*func application(_ application: UIApplication, didReceive notification: UILocalNotification) {
         if (application.applicationState == .inactive) {
             Logger.shared.log("App \(self.episodeId)", "tap local notification \(String(describing: notification.userInfo)), applicationState \(application.applicationState)")
         }
-    }
+    }*/
 
     public func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
         if #available(iOS 9.0, *) {
@@ -1551,11 +1902,14 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             completion()
             return
         }
+        
+        let phoneNumber = payloadJson["phoneNumber"] as? String
 
         callKitIntegration.reportIncomingCall(
             uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId),
             stableId: callUpdate.callId,
             handle: "\(callUpdate.peer.id.id._internalGetInt64Value())",
+            phoneNumber: phoneNumber.flatMap(formatPhoneNumber),
             isVideo: false,
             displayTitle: callUpdate.peer.debugDisplayTitle,
             completion: { error in
@@ -1675,7 +2029,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
         }
         |> deliverOnMainQueue).start(next: { _, context, authContext in
-            if let context = context {
+            if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(url) {
+                authContext.rootController.applyConfirmationCode(confirmationCode)
+            } else if let context = context {
                 context.openUrl(url)
             } else if let authContext = authContext {
                 if let proxyData = parseProxyUrl(url) {
@@ -1687,11 +2043,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     let presentationData = authContext.sharedContext.currentPresentationData.with { $0 }
                     authContext.rootController.currentWindow?.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: presentationData.strings.Passport_NotLoggedInMessage, actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Calls_NotNow, action: {
                         if let callbackUrl = URL(string: secureIdCallbackUrl(with: secureIdData.callbackUrl, peerId: secureIdData.peerId, result: .cancel, parameters: [:])) {
-                            UIApplication.shared.openURL(callbackUrl)
+                            UIApplication.shared.open(callbackUrl, options: [:], completionHandler: nil)
                         }
                     }), TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), on: .root, blockInteraction: false, completion: {})
-                } else if let confirmationCode = parseConfirmationCodeUrl(url) {
-                    authContext.rootController.applyConfirmationCode(confirmationCode)
                 }
             }
         })
@@ -1739,58 +2093,71 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 }
                 
                 if let contact = startCallContacts.first {
-                    var processed = false
-                    if let handle = contact.customIdentifier, handle.hasPrefix("tg") {
-                        let string = handle.suffix(from: handle.index(handle.startIndex, offsetBy: 2))
-                        if let userId = Int64(string) {
-                            startCall(userId)
-                            processed = true
-                        }
+                    let contactByIdentifier: Signal<EnginePeer?, NoError>
+                    if let context = self.contextValue?.context, let contactIdentifier = contact.contactIdentifier {
+                        contactByIdentifier = context.engine.contacts.findPeerByLocalContactIdentifier(identifier: contactIdentifier)
+                    } else {
+                        contactByIdentifier = .single(nil)
                     }
-                    if !processed, let handle = contact.personHandle, let value = handle.value {
-                        switch handle.type {
-                            case .unknown:
-                                if let userId = Int64(value) {
-                                    startCall(userId)
-                                    processed = true
-                                }
-                            case .phoneNumber:
-                                let phoneNumber = cleanPhoneNumber(value)
-                                if !phoneNumber.isEmpty {
-                                    guard let context = self.contextValue?.context else {
-                                        return true
+                    
+                    let _ = (contactByIdentifier |> deliverOnMainQueue).start(next: { peerByContact in
+                        var processed = false
+                        if let peerByContact = peerByContact {
+                            startCall(peerByContact.id.id._internalGetInt64Value())
+                            processed = true
+                        } else if let handle = contact.customIdentifier, handle.hasPrefix("tg") {
+                            let string = handle.suffix(from: handle.index(handle.startIndex, offsetBy: 2))
+                            if let userId = Int64(string) {
+                                startCall(userId)
+                                processed = true
+                            }
+                        }
+                        if !processed, let handle = contact.personHandle, let value = handle.value {
+                            switch handle.type {
+                                case .unknown:
+                                    if let userId = Int64(value) {
+                                        startCall(userId)
+                                        processed = true
                                     }
-                                    let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Contacts.List(includePresences: false))
-                                    |> map { contactList -> PeerId? in
-                                        var result: PeerId?
-                                        for peer in contactList.peers {
-                                            if case let .user(peer) = peer, let peerPhoneNumber = peer.phone {
-                                                if matchPhoneNumbers(phoneNumber, peerPhoneNumber) {
-                                                    result = peer.id
-                                                    break
+                                case .phoneNumber:
+                                    let phoneNumber = cleanPhoneNumber(value)
+                                    if !phoneNumber.isEmpty {
+                                        guard let context = self.contextValue?.context else {
+                                            return
+                                        }
+                                        let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Contacts.List(includePresences: false))
+                                        |> map { contactList -> PeerId? in
+                                            var result: PeerId?
+                                            for peer in contactList.peers {
+                                                if case let .user(peer) = peer, let peerPhoneNumber = peer.phone {
+                                                    if matchPhoneNumbers(phoneNumber, peerPhoneNumber) {
+                                                        result = peer.id
+                                                        break
+                                                    }
                                                 }
                                             }
+                                            return result
                                         }
-                                        return result
+                                        |> deliverOnMainQueue).start(next: { peerId in
+                                            if let peerId = peerId {
+                                                startCall(peerId.id._internalGetInt64Value())
+                                            }
+                                        })
+                                        processed = true
                                     }
-                                    |> deliverOnMainQueue).start(next: { peerId in
-                                        if let peerId = peerId {
-                                            startCall(peerId.id._internalGetInt64Value())
-                                        }
-                                    })
-                                    processed = true
-                                }
-                            default:
-                                break
+                                default:
+                                    break
+                            }
                         }
-                    }
-
+                    })
+                    
+                    return true
                 }
             } else if let sendMessageIntent = userActivity.interaction?.intent as? INSendMessageIntent {
                 if let contact = sendMessageIntent.recipients?.first, let handle = contact.customIdentifier, handle.hasPrefix("tg") {
                     let string = handle.suffix(from: handle.index(handle.startIndex, offsetBy: 2))
                     if let userId = Int64(string) {
-                        self.openChatWhenReady(accountId: nil, peerId: PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(userId)), activateInput: true)
+                        self.openChatWhenReady(accountId: nil, peerId: PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(userId)), threadId: nil, activateInput: true)
                     }
                 }
             }
@@ -1831,7 +2198,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         if let primary = primary {
                             for context in contexts {
                                 if let context = context, context.account.id == primary {
-                                    self.openChatWhenReady(accountId: nil, peerId: peerId)
+                                    self.openChatWhenReady(accountId: nil, peerId: peerId, threadId: nil)
                                     return
                                 }
                             }
@@ -1839,7 +2206,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         
                         for context in contexts {
                             if let context = context {
-                                self.openChatWhenReady(accountId: context.account.id, peerId: peerId)
+                                self.openChatWhenReady(accountId: context.account.id, peerId: peerId, threadId: nil)
                                 return
                             }
                         }
@@ -1872,7 +2239,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                                 case .camera:
                                     context.openRootCamera()
                                 case .savedMessages:
-                                    self.openChatWhenReady(accountId: nil, peerId: context.context.account.peerId)
+                                    self.openChatWhenReady(accountId: nil, peerId: context.context.account.peerId, threadId: nil)
                                 case .account:
                                     context.switchAccount()
                             }
@@ -1923,7 +2290,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }))
     }
     
-    private func openChatWhenReady(accountId: AccountRecordId?, peerId: PeerId, messageId: MessageId? = nil, activateInput: Bool = false) {
+    private func openChatWhenReady(accountId: AccountRecordId?, peerId: PeerId, threadId: Int64?, messageId: MessageId? = nil, activateInput: Bool = false) {
         let signal = self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue
@@ -1942,7 +2309,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         self.openChatWhenReadyDisposable.set((signal
         |> deliverOnMainQueue).start(next: { context in
-            context.openChatWithPeerId(peerId: peerId, messageId: messageId, activateInput: activateInput)
+            context.openChatWithPeerId(peerId: peerId, threadId: threadId, messageId: messageId, activateInput: activateInput)
         }))
     }
     
@@ -1966,15 +2333,15 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let _ = (accountIdFromNotification(response.notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-                if let peerId = peerIdFromNotification(response.notification) {
+                if let (peerId, threadId) = peerIdFromNotification(response.notification) {
                     var messageId: MessageId? = nil
                     if response.notification.request.content.categoryIdentifier == "watch" {
                         messageId = messageIdFromNotification(peerId: peerId, notification: response.notification)
                     }
-                    self.openChatWhenReady(accountId: accountId, peerId: peerId, messageId: messageId)
+                    self.openChatWhenReady(accountId: accountId, peerId: peerId, threadId: threadId, messageId: messageId)
                 }
                 completionHandler()
-            } else if response.actionIdentifier == "reply", let peerId = peerIdFromNotification(response.notification), let accountId = accountId {
+            } else if response.actionIdentifier == "reply", let (peerId, _) = peerIdFromNotification(response.notification), let accountId = accountId {
                 guard let response = response as? UNTextInputNotificationResponse, !response.userText.isEmpty else {
                     completionHandler()
                     return
@@ -2000,7 +2367,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         if let messageId = messageIdFromNotification(peerId: peerId, notification: response.notification) {
                             let _ = TelegramEngine(account: account).messages.applyMaxReadIndexInteractively(index: MessageIndex(id: messageId, timestamp: 0)).start()
                         }
-                        return enqueueMessages(account: account, peerId: peerId, messages: [EnqueueMessage.message(text: text, attributes: [], mediaReference: nil, replyToMessageId: nil, localGroupingKey: nil, correlationId: nil)])
+                        return enqueueMessages(account: account, peerId: peerId, messages: [EnqueueMessage.message(text: text, attributes: [], inlineStickers: [:], mediaReference: nil, replyToMessageId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])])
                         |> map { messageIds -> MessageId? in
                             if messageIds.isEmpty {
                                 return nil
@@ -2057,7 +2424,10 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     private func registerForNotifications(replyString: String, messagePlaceholderString: String, hiddenContentString: String, includeNames: Bool, authorize: Bool = true, completion: @escaping (Bool) -> Void = { _ in }) {
         if #available(iOS 10.0, *) {
             let notificationCenter = UNUserNotificationCenter.current()
+            Logger.shared.log("App \(self.episodeId)", "register for notifications: get settings (authorize: \(authorize))")
             notificationCenter.getNotificationSettings(completionHandler: { settings in
+                Logger.shared.log("App \(self.episodeId)", "register for notifications: received settings: \(settings.authorizationStatus)")
+                
                 switch (settings.authorizationStatus, authorize) {
                     case (.authorized, _), (.notDetermined, true):
                         var authorizationOptions: UNAuthorizationOptions = [.badge, .sound, .alert, .carPlay]
@@ -2067,7 +2437,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         if #available(iOS 13.0, *) {
                             authorizationOptions.insert(.announcement)
                         }
+                        Logger.shared.log("App \(self.episodeId)", "register for notifications: request authorization")
                         notificationCenter.requestAuthorization(options: authorizationOptions, completionHandler: { result, _ in
+                            Logger.shared.log("App \(self.episodeId)", "register for notifications: received authorization: \(result)")
                             completion(result)
                             if result {
                                 Queue.mainQueue().async {
@@ -2117,6 +2489,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                                     
                                     UNUserNotificationCenter.current().setNotificationCategories([unknownMessageCategory, replyMessageCategory, replyLegacyMessageCategory, replyLegacyMediaMessageCategory, replyMediaMessageCategory, legacyChannelMessageCategory, muteMessageCategory, muteMediaMessageCategory])
                                     
+                                    Logger.shared.log("App \(self.episodeId)", "register for notifications: invoke registerForRemoteNotifications")
                                     UIApplication.shared.registerForRemoteNotifications()
                                 }
                             }
@@ -2130,14 +2503,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             reply.identifier = "reply"
             reply.title = replyString
             reply.isDestructive = false
-            if #available(iOS 9.0, *) {
-                reply.isAuthenticationRequired = false
-                reply.behavior = .textInput
-                reply.activationMode = .background
-            } else {
-                reply.isAuthenticationRequired = true
-                reply.activationMode = .foreground
-            }
+            reply.isAuthenticationRequired = false
+            reply.behavior = .textInput
+            reply.activationMode = .background
             
             let unknownMessageCategory = UIMutableUserNotificationCategory()
             unknownMessageCategory.identifier = "unknown"
@@ -2355,11 +2723,13 @@ private func accountIdFromNotification(_ notification: UNNotification, sharedCon
 }
 
 @available(iOS 10.0, *)
-private func peerIdFromNotification(_ notification: UNNotification) -> PeerId? {
+private func peerIdFromNotification(_ notification: UNNotification) -> (peerId: PeerId, threadId: Int64?)? {
+    let threadId = notification.request.content.userInfo["threadId"] as? Int64
+    
     if let peerId = notification.request.content.userInfo["peerId"] as? Int64 {
-        return PeerId(peerId)
+        return (PeerId(peerId), threadId)
     } else if let peerIdString = notification.request.content.userInfo["peerId"] as? String, let peerId = Int64(peerIdString) {
-        return PeerId(peerId)
+        return (PeerId(peerId), threadId)
     } else {
         let payload = notification.request.content.userInfo
         var peerId: PeerId?
@@ -2376,7 +2746,12 @@ private func peerIdFromNotification(_ notification: UNNotification) -> PeerId? {
             let fromIdValue = fromId as! NSString
             peerId = PeerId(namespace: Namespaces.Peer.SecretChat, id: PeerId.Id._internalFromInt64Value(Int64(fromIdValue as String) ?? 0))
         }
-        return peerId
+        
+        if let peerId = peerId {
+            return (peerId, threadId)
+        } else {
+            return nil
+        }
     }
 }
 

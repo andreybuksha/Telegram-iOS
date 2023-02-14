@@ -13,6 +13,10 @@ public final class ItemListRevealOptionsGestureRecognizer: UIPanGestureRecognize
     override public init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
         
+        if #available(iOS 13.4, *) {
+            self.allowedScrollTypesMask = .continuous
+        }
+        
         self.maximumNumberOfTouches = 1
     }
     
@@ -161,9 +165,13 @@ open class ItemListRevealOptionsItemNode: ListViewItemNode, UIGestureRecognizerD
     override open func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if let recognizer = self.recognizer, gestureRecognizer == self.tapRecognizer {
             return abs(self.revealOffset) > 0.0 && !recognizer.validatedGesture
-        } else {
-            return true
+        } else if let recognizer = self.recognizer, gestureRecognizer == self.recognizer, recognizer.numberOfTouches == 0 {
+            let translation = recognizer.velocity(in: recognizer.view)
+            if abs(translation.y) > 4.0 && abs(translation.y) > abs(translation.x) * 2.5 {
+                return false
+            }
         }
+        return true
     }
     
     open func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -488,7 +496,7 @@ open class ItemListRevealOptionsItemNode: ListViewItemNode, UIGestureRecognizerD
     open func animateRevealOptionsFill(completion: (() -> Void)? = nil) {
         if let validLayout = self.validLayout {
             self.layer.allowsGroupOpacity = true
-            self.updateRevealOffsetInternal(offset: -validLayout.0.width - 74.0, transition: .animated(duration: 0.2, curve: .spring), completion: {
+            self.updateRevealOffsetInternal(offset: -validLayout.0.width - 74.0, transition: .animated(duration: 0.3, curve: .spring), completion: {
                 self.layer.allowsGroupOpacity = false
                 completion?()
             })

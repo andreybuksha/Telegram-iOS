@@ -15,7 +15,6 @@ import AppBundle
 import DatePickerNode
 import DebugSettingsUI
 import TabBarUI
-import PremiumUI
 
 public final class TelegramRootController: NavigationController {
     private let context: AccountContext
@@ -74,14 +73,13 @@ public final class TelegramRootController: NavigationController {
             }
         })
         
-        self.applicationInFocusDisposable = (context.sharedContext.applicationBindings.applicationIsActive
-        |> distinctUntilChanged
-        |> deliverOn(Queue.mainQueue())).start(next: { [weak self] value in
-            guard let strongSelf = self else {
-                return
-            }
-            strongSelf.setForceBadgeHidden(!value)
-        })
+        if context.sharedContext.applicationBindings.isMainApp {
+            self.applicationInFocusDisposable = (context.sharedContext.applicationBindings.applicationIsActive
+            |> distinctUntilChanged
+            |> deliverOn(Queue.mainQueue())).start(next: { value in
+                context.sharedContext.mainWindow?.setForceBadgeHidden(!value)
+            })
+        }
     }
     
     required public init(coder aDecoder: NSCoder) {
@@ -97,7 +95,7 @@ public final class TelegramRootController: NavigationController {
     public func addRootControllers(showCallsTab: Bool) {
         let tabBarController = TabBarControllerImpl(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData), theme: TabBarControllerTheme(rootControllerTheme: self.presentationData.theme))
         tabBarController.navigationPresentation = .master
-        let chatListController = self.context.sharedContext.makeChatListController(context: self.context, groupId: .root, controlsHistoryPreload: true, hideNetworkActivityStatus: false, previewing: false, enableDebugActions: !GlobalExperimentalSettings.isAppStoreBuild)
+        let chatListController = self.context.sharedContext.makeChatListController(context: self.context, location: .chatList(groupId: .root), controlsHistoryPreload: true, hideNetworkActivityStatus: false, previewing: false, enableDebugActions: !GlobalExperimentalSettings.isAppStoreBuild)
         if let sharedContext = self.context.sharedContext as? SharedAccountContextImpl {
             chatListController.tabBarItem.badgeValue = sharedContext.switchingData.chatListBadge
         }
@@ -125,15 +123,16 @@ public final class TelegramRootController: NavigationController {
             sharedContext.switchingData = (nil, nil, nil)
         }
         
-        let accountSettingsController = PeerInfoScreenImpl(context: self.context, updatedPresentationData: nil, peerId: self.context.account.peerId, avatarInitiallyExpanded: false, isOpenedFromChat: false, nearbyPeerDistance: nil, callMessages: [], isSettings: true)
-        accountSettingsController.tabBarItemDebugTapAction = { [weak self, weak accountSettingsController] in
-            guard let strongSelf = self, let accountSettingsController = accountSettingsController else {
+        let accountSettingsController = PeerInfoScreenImpl(context: self.context, updatedPresentationData: nil, peerId: self.context.account.peerId, avatarInitiallyExpanded: false, isOpenedFromChat: false, nearbyPeerDistance: nil, reactionSourceMessageId: nil, callMessages: [], isSettings: true)
+        accountSettingsController.tabBarItemDebugTapAction = { [weak self] in
+            guard let strongSelf = self else {
                 return
             }
-            accountSettingsController.push(debugController(sharedContext: strongSelf.context.sharedContext, context: strongSelf.context))
+            strongSelf.pushViewController(debugController(sharedContext: strongSelf.context.sharedContext, context: strongSelf.context))
         }
+        accountSettingsController.parentController = self
         controllers.append(accountSettingsController)
-        
+                
         tabBarController.setControllers(controllers, selectedIndex: restoreSettignsController != nil ? (controllers.count - 1) : (controllers.count - 2))
         
         self.contactsController = contactsController
@@ -187,5 +186,17 @@ public final class TelegramRootController: NavigationController {
         }
         controller.view.endEditing(true)
         presentedLegacyShortcutCamera(context: self.context, saveCapturedMedia: false, saveEditedPhotos: false, mediaGrouping: true, parentController: controller)
+    }
+    
+    public func openSettings() {
+        guard let rootTabController = self.rootTabController else {
+            return
+        }
+        
+        self.popToRoot(animated: false)
+    
+        if let index = rootTabController.controllers.firstIndex(where: { $0 is PeerInfoScreenImpl }) {
+            rootTabController.selectedIndex = index
+        }
     }
 }

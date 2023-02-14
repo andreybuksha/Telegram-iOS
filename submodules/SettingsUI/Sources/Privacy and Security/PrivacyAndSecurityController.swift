@@ -14,6 +14,11 @@ import TelegramNotices
 import LocalAuth
 import AppBundle
 import PasswordSetupUI
+import UndoUI
+import PremiumUI
+import AuthorizationUI
+import AuthenticationServices
+import ChatTimerScreen
 
 private final class PrivacyAndSecurityControllerArguments {
     let account: Account
@@ -24,14 +29,17 @@ private final class PrivacyAndSecurityControllerArguments {
     let openProfilePhotoPrivacy: () -> Void
     let openForwardPrivacy: () -> Void
     let openPhoneNumberPrivacy: () -> Void
+    let openVoiceMessagePrivacy: () -> Void
     let openPasscode: () -> Void
     let openTwoStepVerification: (TwoStepVerificationAccessConfiguration?) -> Void
     let openActiveSessions: () -> Void
     let toggleArchiveAndMuteNonContacts: (Bool) -> Void
     let setupAccountAutoremove: () -> Void
+    let setupMessageAutoremove: () -> Void
     let openDataSettings: () -> Void
+    let openEmailSettings: (String?) -> Void
     
-    init(account: Account, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping () -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVerificationAccessConfiguration?) -> Void, openActiveSessions: @escaping () -> Void, toggleArchiveAndMuteNonContacts: @escaping (Bool) -> Void, setupAccountAutoremove: @escaping () -> Void, openDataSettings: @escaping () -> Void) {
+    init(account: Account, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping () -> Void, openVoiceMessagePrivacy: @escaping () -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVerificationAccessConfiguration?) -> Void, openActiveSessions: @escaping () -> Void, toggleArchiveAndMuteNonContacts: @escaping (Bool) -> Void, setupAccountAutoremove: @escaping () -> Void, setupMessageAutoremove: @escaping () -> Void, openDataSettings: @escaping () -> Void, openEmailSettings: @escaping (String?) -> Void) {
         self.account = account
         self.openBlockedUsers = openBlockedUsers
         self.openLastSeenPrivacy = openLastSeenPrivacy
@@ -40,12 +48,15 @@ private final class PrivacyAndSecurityControllerArguments {
         self.openProfilePhotoPrivacy = openProfilePhotoPrivacy
         self.openForwardPrivacy = openForwardPrivacy
         self.openPhoneNumberPrivacy = openPhoneNumberPrivacy
+        self.openVoiceMessagePrivacy = openVoiceMessagePrivacy
         self.openPasscode = openPasscode
         self.openTwoStepVerification = openTwoStepVerification
         self.openActiveSessions = openActiveSessions
         self.toggleArchiveAndMuteNonContacts = toggleArchiveAndMuteNonContacts
         self.setupAccountAutoremove = setupAccountAutoremove
+        self.setupMessageAutoremove = setupMessageAutoremove
         self.openDataSettings = openDataSettings
+        self.openEmailSettings = openEmailSettings
     }
 }
 
@@ -54,11 +65,13 @@ private enum PrivacyAndSecuritySection: Int32 {
     case privacy
     case autoArchive
     case account
+    case messageAutoremove
     case dataSettings
 }
 
 public enum PrivacyAndSecurityEntryTag: ItemListItemTag {
     case accountTimeout
+    case messageAutoremoveTimeout
     case autoArchive
     
     public func isEqual(to other: ItemListItemTag) -> Bool {
@@ -79,9 +92,12 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
     case voiceCallPrivacy(PresentationTheme, String, String)
     case forwardPrivacy(PresentationTheme, String, String)
     case groupPrivacy(PresentationTheme, String, String)
+    case voiceMessagePrivacy(PresentationTheme, String, String, Bool)
     case selectivePrivacyInfo(PresentationTheme, String)
     case passcode(PresentationTheme, String, Bool, String)
     case twoStepVerification(PresentationTheme, String, String, TwoStepVerificationAccessConfiguration?)
+    case loginEmail(PresentationTheme, String, String?)
+    case loginEmailInfo(PresentationTheme, String)
     case activeSessions(PresentationTheme, String, String)
     case autoArchiveHeader(String)
     case autoArchive(String, Bool)
@@ -89,21 +105,23 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
     case accountHeader(PresentationTheme, String)
     case accountTimeout(PresentationTheme, String, String)
     case accountInfo(PresentationTheme, String)
+    case messageAutoremoveTimeout(PresentationTheme, String, String)
+    case messageAutoremoveInfo(PresentationTheme, String)
     case dataSettings(PresentationTheme, String)
     case dataSettingsInfo(PresentationTheme, String)
     
     var section: ItemListSectionId {
         switch self {
-            case .blockedPeers, .activeSessions, .passcode, .twoStepVerification:
-                return PrivacyAndSecuritySection.general.rawValue
-            case .privacyHeader, .phoneNumberPrivacy, .lastSeenPrivacy, .profilePhotoPrivacy, .forwardPrivacy, .groupPrivacy, .selectivePrivacyInfo, .voiceCallPrivacy:
-                return PrivacyAndSecuritySection.privacy.rawValue
-            case .autoArchiveHeader, .autoArchive, .autoArchiveInfo:
-                return PrivacyAndSecuritySection.autoArchive.rawValue
-            case .accountHeader, .accountTimeout, .accountInfo:
-                return PrivacyAndSecuritySection.account.rawValue
-            case .dataSettings, .dataSettingsInfo:
-                return PrivacyAndSecuritySection.dataSettings.rawValue
+        case .blockedPeers, .activeSessions, .passcode, .twoStepVerification, .loginEmail, .loginEmailInfo, .messageAutoremoveTimeout, .messageAutoremoveInfo:
+            return PrivacyAndSecuritySection.general.rawValue
+        case .privacyHeader, .phoneNumberPrivacy, .lastSeenPrivacy, .profilePhotoPrivacy, .forwardPrivacy, .groupPrivacy, .voiceCallPrivacy, .voiceMessagePrivacy, .selectivePrivacyInfo:
+            return PrivacyAndSecuritySection.privacy.rawValue
+        case .autoArchiveHeader, .autoArchive, .autoArchiveInfo:
+            return PrivacyAndSecuritySection.autoArchive.rawValue
+        case .accountHeader, .accountTimeout, .accountInfo:
+            return PrivacyAndSecuritySection.account.rawValue
+        case .dataSettings, .dataSettingsInfo:
+            return PrivacyAndSecuritySection.dataSettings.rawValue
         }
     }
     
@@ -117,38 +135,48 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 return 3
             case .twoStepVerification:
                 return 4
-            case .privacyHeader:
+            case .messageAutoremoveTimeout:
                 return 5
-            case .phoneNumberPrivacy:
+            case .messageAutoremoveInfo:
                 return 6
-            case .lastSeenPrivacy:
+            case .loginEmail:
                 return 7
-            case .profilePhotoPrivacy:
+            case .loginEmailInfo:
                 return 8
-            case .voiceCallPrivacy:
+            case .privacyHeader:
                 return 9
-            case .forwardPrivacy:
+            case .phoneNumberPrivacy:
                 return 10
-            case .groupPrivacy:
+            case .lastSeenPrivacy:
                 return 11
-            case .selectivePrivacyInfo:
+            case .profilePhotoPrivacy:
                 return 12
-            case .autoArchiveHeader:
+            case .voiceCallPrivacy:
                 return 13
-            case .autoArchive:
+            case .voiceMessagePrivacy:
                 return 14
-            case .autoArchiveInfo:
+            case .forwardPrivacy:
                 return 15
-            case .accountHeader:
+            case .groupPrivacy:
                 return 16
-            case .accountTimeout:
+            case .selectivePrivacyInfo:
                 return 17
-            case .accountInfo:
+            case .autoArchiveHeader:
                 return 18
-            case .dataSettings:
+            case .autoArchive:
                 return 19
-            case .dataSettingsInfo:
+            case .autoArchiveInfo:
                 return 20
+            case .accountHeader:
+                return 21
+            case .accountTimeout:
+                return 22
+            case .accountInfo:
+                return 23
+            case .dataSettings:
+                return 24
+            case .dataSettingsInfo:
+                return 25
         }
     }
     
@@ -196,14 +224,20 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 } else {
                     return false
                 }
-            case let .selectivePrivacyInfo(lhsTheme, lhsText):
-                if case let .selectivePrivacyInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+            case let .voiceCallPrivacy(lhsTheme, lhsText, lhsValue):
+                if case let .voiceCallPrivacy(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
                     return true
                 } else {
                     return false
                 }
-            case let .voiceCallPrivacy(lhsTheme, lhsText, lhsValue):
-                if case let .voiceCallPrivacy(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+            case let .voiceMessagePrivacy(lhsTheme, lhsText, lhsValue, lhsLocked):
+                if case let .voiceMessagePrivacy(rhsTheme, rhsText, rhsValue, rhsLocked) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue, lhsLocked == rhsLocked {
+                    return true
+                } else {
+                    return false
+                }
+            case let .selectivePrivacyInfo(lhsTheme, lhsText):
+                if case let .selectivePrivacyInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
                 } else {
                     return false
@@ -216,6 +250,18 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 }
             case let .twoStepVerification(lhsTheme, lhsText, lhsValue, lhsData):
                 if case let .twoStepVerification(rhsTheme, rhsText, rhsValue, rhsData) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue, lhsData == rhsData {
+                    return true
+                } else {
+                    return false
+                }
+            case let .loginEmail(lhsTheme, lhsText, lhsEmailPattern):
+                if case let .loginEmail(rhsTheme, rhsText, rhsEmailPattern) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsEmailPattern == rhsEmailPattern {
+                    return true
+                } else {
+                    return false
+                }
+            case let .loginEmailInfo(lhsTheme, lhsText):
+                if case let .loginEmailInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
                 } else {
                     return false
@@ -258,6 +304,18 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 }
             case let .accountInfo(lhsTheme, lhsText):
                 if case let .accountInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
+            case let .messageAutoremoveTimeout(lhsTheme, lhsText, lhsValue):
+                if case let .messageAutoremoveTimeout(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+                    return true
+                } else {
+                    return false
+                }
+            case let .messageAutoremoveInfo(lhsTheme, lhsText):
+                if case let .messageAutoremoveInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
                 } else {
                     return false
@@ -310,6 +368,10 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, sectionId: self.section, style: .blocks, action: {
                     arguments.openGroupsPrivacy()
                 })
+            case let .voiceMessagePrivacy(_, text, value, locked):
+                return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, labelStyle: locked ? .textWithIcon(UIImage(bundleImageName: "Chat/Input/Accessory Panels/TextLockIcon")!.precomposed()) : .text, sectionId: self.section, style: .blocks, action: {
+                    arguments.openVoiceMessagePrivacy()
+                })
             case let .selectivePrivacyInfo(_, text):
                 return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
             case let .voiceCallPrivacy(_, text, value):
@@ -324,6 +386,18 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 return ItemListDisclosureItem(presentationData: presentationData, icon: UIImage(bundleImageName: "Settings/Menu/TwoStepAuth")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
                     arguments.openTwoStepVerification(data)
                 })
+            case let .messageAutoremoveTimeout(_, text, value):
+                return ItemListDisclosureItem(presentationData: presentationData, icon: UIImage(bundleImageName: "Settings/Menu/Timer")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
+                    arguments.setupMessageAutoremove()
+                }, tag: PrivacyAndSecurityEntryTag.messageAutoremoveTimeout)
+            case let .messageAutoremoveInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+            case let .loginEmail(_, text, emailPattern):
+                return ItemListDisclosureItem(presentationData: presentationData, icon: UIImage(bundleImageName: "Settings/Menu/LoginEmail")?.precomposed(), title: text, label: "", sectionId: self.section, style: .blocks, action: {
+                    arguments.openEmailSettings(emailPattern)
+                })
+            case let .loginEmailInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
             case let .activeSessions(_, text, value):
                 return ItemListDisclosureItem(presentationData: presentationData, icon: UIImage(bundleImageName: "Settings/Menu/Websites")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
                     arguments.openActiveSessions()
@@ -357,6 +431,7 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
 private struct PrivacyAndSecurityControllerState: Equatable {
     var updatingAccountTimeoutValue: Int32? = nil
     var updatingAutomaticallyArchiveAndMuteNonContacts: Bool? = nil
+    var updatingMessageAutoremoveTimeoutValue: Int32? = nil
 }
 
 private func countForSelectivePeers(_ peers: [PeerId: SelectivePrivacyPeer]) -> Int {
@@ -394,7 +469,20 @@ private func stringForSelectiveSettings(strings: PresentationStrings, settings: 
     }
 }
 
-private func privacyAndSecurityControllerEntries(presentationData: PresentationData, state: PrivacyAndSecurityControllerState, privacySettings: AccountPrivacySettings?, accessChallengeData: PostboxAccessChallengeData, blockedPeerCount: Int?, activeWebsitesCount: Int, hasTwoStepAuth: Bool?, twoStepAuthData: TwoStepVerificationAccessConfiguration?, canAutoarchive: Bool) -> [PrivacyAndSecurityEntry] {
+private func privacyAndSecurityControllerEntries(
+    presentationData: PresentationData,
+    state: PrivacyAndSecurityControllerState,
+    privacySettings: AccountPrivacySettings?,
+    accessChallengeData: PostboxAccessChallengeData,
+    blockedPeerCount: Int?,
+    activeWebsitesCount: Int,
+    hasTwoStepAuth: Bool?,
+    twoStepAuthData: TwoStepVerificationAccessConfiguration?,
+    canAutoarchive: Bool,
+    isPremiumDisabled: Bool,
+    isPremium: Bool,
+    loginEmail: String?
+) -> [PrivacyAndSecurityEntry] {
     var entries: [PrivacyAndSecurityEntry] = []
     
     entries.append(.blockedPeers(presentationData.theme, presentationData.strings.Settings_BlockedUsers, blockedPeerCount == nil ? "" : (blockedPeerCount == 0 ? presentationData.strings.PrivacySettings_BlockedPeersEmpty : "\(blockedPeerCount!)")))
@@ -426,12 +514,39 @@ private func privacyAndSecurityControllerEntries(presentationData: PresentationD
     }
     entries.append(.twoStepVerification(presentationData.theme, presentationData.strings.PrivacySettings_TwoStepAuth, twoStepAuthString, twoStepAuthData))
     
+    if let privacySettings = privacySettings {
+        let value: Int32?
+        if let updatingMessageAutoremoveTimeoutValue = state.updatingMessageAutoremoveTimeoutValue {
+            value = updatingMessageAutoremoveTimeoutValue
+        } else {
+            value = privacySettings.messageAutoremoveTimeout
+        }
+        let valueText: String
+        if let value {
+            valueText = timeIntervalString(strings: presentationData.strings, value: value)
+        } else {
+            valueText = presentationData.strings.Autoremove_OptionOff
+        }
+        entries.append(.messageAutoremoveTimeout(presentationData.theme, presentationData.strings.Settings_AutoDeleteTitle, valueText))
+    } else {
+        entries.append(.messageAutoremoveTimeout(presentationData.theme, presentationData.strings.Settings_AutoDeleteTitle, presentationData.strings.Channel_NotificationLoading))
+    }
+    entries.append(.messageAutoremoveInfo(presentationData.theme, presentationData.strings.Settings_AutoDeleteInfo))
+    
+    if loginEmail != nil {
+        entries.append(.loginEmail(presentationData.theme, presentationData.strings.PrivacySettings_LoginEmail, loginEmail))
+        entries.append(.loginEmailInfo(presentationData.theme, presentationData.strings.PrivacySettings_LoginEmailInfo))
+    }
+    
     entries.append(.privacyHeader(presentationData.theme, presentationData.strings.PrivacySettings_PrivacyTitle))
     if let privacySettings = privacySettings {
         entries.append(.phoneNumberPrivacy(presentationData.theme, presentationData.strings.PrivacySettings_PhoneNumber, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.phoneNumber)))
         entries.append(.lastSeenPrivacy(presentationData.theme, presentationData.strings.PrivacySettings_LastSeen, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.presence)))
         entries.append(.profilePhotoPrivacy(presentationData.theme, presentationData.strings.Privacy_ProfilePhoto, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.profilePhoto)))
         entries.append(.voiceCallPrivacy(presentationData.theme, presentationData.strings.Privacy_Calls, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.voiceCalls)))
+        if !isPremiumDisabled {
+            entries.append(.voiceMessagePrivacy(presentationData.theme, presentationData.strings.Privacy_VoiceMessages, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.voiceMessages), !isPremium))
+        }
         entries.append(.forwardPrivacy(presentationData.theme, presentationData.strings.Privacy_Forwards, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.forwards)))
         entries.append(.groupPrivacy(presentationData.theme, presentationData.strings.Privacy_GroupsAndChannels, stringForSelectiveSettings(strings: presentationData.strings, settings: privacySettings.groupInvitations)))
         
@@ -440,6 +555,9 @@ private func privacyAndSecurityControllerEntries(presentationData: PresentationD
         entries.append(.lastSeenPrivacy(presentationData.theme, presentationData.strings.PrivacySettings_LastSeen, presentationData.strings.Channel_NotificationLoading))
         entries.append(.profilePhotoPrivacy(presentationData.theme, presentationData.strings.Privacy_ProfilePhoto, presentationData.strings.Channel_NotificationLoading))
         entries.append(.voiceCallPrivacy(presentationData.theme, presentationData.strings.Privacy_Calls, presentationData.strings.Channel_NotificationLoading))
+        if !isPremiumDisabled {
+            entries.append(.voiceMessagePrivacy(presentationData.theme, presentationData.strings.Privacy_VoiceMessages, presentationData.strings.Channel_NotificationLoading, !isPremium))
+        }
         entries.append(.forwardPrivacy(presentationData.theme, presentationData.strings.Privacy_Forwards, presentationData.strings.Channel_NotificationLoading))
         entries.append(.groupPrivacy(presentationData.theme, presentationData.strings.Privacy_GroupsAndChannels, presentationData.strings.Channel_NotificationLoading))
         entries.append(.selectivePrivacyInfo(presentationData.theme, presentationData.strings.PrivacyLastSeenSettings_GroupsAndChannelsHelp))
@@ -482,7 +600,36 @@ private func privacyAndSecurityControllerEntries(presentationData: PresentationD
     return entries
 }
 
-public func privacyAndSecurityController(context: AccountContext, initialSettings: AccountPrivacySettings? = nil, updatedSettings: ((AccountPrivacySettings?) -> Void)? = nil, updatedBlockedPeers: ((BlockedPeersContext?) -> Void)? = nil, updatedHasTwoStepAuth: ((Bool) -> Void)? = nil, focusOnItemTag: PrivacyAndSecurityEntryTag? = nil, activeSessionsContext: ActiveSessionsContext? = nil, webSessionsContext: WebSessionsContext? = nil, blockedPeersContext: BlockedPeersContext? = nil, hasTwoStepAuth: Bool? = nil) -> ViewController {
+class PrivacyAndSecurityControllerImpl: ItemListController, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    var authorizationCompletion: ((Any) -> Void)?
+    
+    @available(iOS 13.0, *)
+    public func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        self.authorizationCompletion?(authorization.credential)
+    }
+    
+    @available(iOS 13.0, *)
+    public func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return self.view.window!
+    }
+}
+
+public func privacyAndSecurityController(
+    context: AccountContext,
+    initialSettings: AccountPrivacySettings? = nil,
+    updatedSettings: ((AccountPrivacySettings?) -> Void)? = nil,
+    updatedBlockedPeers: ((BlockedPeersContext?) -> Void)? = nil,
+    updatedHasTwoStepAuth: ((Bool) -> Void)? = nil,
+    focusOnItemTag: PrivacyAndSecurityEntryTag? = nil,
+    activeSessionsContext: ActiveSessionsContext? = nil,
+    webSessionsContext: WebSessionsContext? = nil,
+    blockedPeersContext: BlockedPeersContext? = nil,
+    hasTwoStepAuth: Bool? = nil,
+    loginEmailPattern: Signal<String?, NoError>? = nil,
+    updatedTwoStepAuthData: (() -> Void)? = nil,
+    requestPublicPhotoSetup: ((@escaping (UIImage?) -> Void) -> Void)? = nil,
+    requestPublicPhotoRemove: ((@escaping () -> Void) -> Void)? = nil
+) -> ViewController {
     let statePromise = ValuePromise(PrivacyAndSecurityControllerState(), ignoreRepeated: true)
     let stateValue = Atomic(value: PrivacyAndSecurityControllerState())
     let updateState: ((PrivacyAndSecurityControllerState) -> PrivacyAndSecurityControllerState) -> Void = { f in
@@ -492,6 +639,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
     var pushControllerImpl: ((ViewController, Bool) -> Void)?
     var replaceTopControllerImpl: ((ViewController) -> Void)?
     var presentControllerImpl: ((ViewController) -> Void)?
+    var getNavigationControllerImpl: (() -> NavigationController?)?
     
     let actionsDisposable = DisposableSet()
     
@@ -540,6 +688,23 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         twoStepAuth.set(hasTwoStepAuthDataValue)
     }
     
+    let loginEmail: Signal<String?, NoError>
+    if let loginEmailPattern = loginEmailPattern {
+        loginEmail = loginEmailPattern
+    } else {
+        loginEmail = .single(nil)
+        |> then(
+            context.engine.auth.twoStepAuthData()
+            |> map(Optional.init)
+            |> `catch` { _ -> Signal<TwoStepAuthData?, NoError> in
+                return .single(nil)
+            }
+            |> map { data -> String? in
+                return data?.loginEmailPattern
+            }
+        )
+    }
+    
     let updateHasTwoStepAuth: () -> Void = {
         let signal = context.engine.auth.twoStepVerificationConfiguration()
         |> map { value -> TwoStepVerificationAccessConfiguration? in
@@ -561,6 +726,8 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
     }
     updateHasTwoStepAuth()
     
+    var setupEmailImpl: ((String?) -> Void)?
+    
     let arguments = PrivacyAndSecurityControllerArguments(account: context.account, openBlockedUsers: {
         pushControllerImpl?(blockedPeersController(context: context, blockedPeersContext: blockedPeersContext), true)
     }, openLastSeenPrivacy: {
@@ -577,7 +744,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: updated, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: updated, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
@@ -600,7 +767,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: updated, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: updated, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
@@ -637,7 +804,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: updated, voiceCallsP2P: updatedCallsPrivacy, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: updated, voiceCallsP2P: updatedCallsPrivacy, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
@@ -652,7 +819,11 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         |> deliverOnMainQueue
         currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] info in
             if let info = info {
-                pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .profilePhoto, current: info.profilePhoto, updated: { updated, _, _ in
+                pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .profilePhoto, current: info.profilePhoto, requestPublicPhotoSetup: { completion in
+                    requestPublicPhotoSetup?(completion)
+                }, requestPublicPhotoRemove: { completion in
+                    requestPublicPhotoRemove?(completion)
+                }, updated: { updated, _, _ in
                     if let currentInfoDisposable = currentInfoDisposable {
                         let applySetting: Signal<Void, NoError> = privacySettingsPromise.get()
                         |> filter { $0 != nil }
@@ -660,7 +831,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: updated, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: updated, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
@@ -683,7 +854,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                             |> deliverOnMainQueue
                             |> mapToSignal { value -> Signal<Void, NoError> in
                                 if let value = value {
-                                    privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: updated, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                    privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: updated, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                                 }
                                 return .complete()
                         }
@@ -706,13 +877,60 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: updated, phoneDiscoveryEnabled: updatedDiscoveryEnabled ?? value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: updated, phoneDiscoveryEnabled: updatedDiscoveryEnabled ?? value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
                         currentInfoDisposable.set(applySetting.start())
                     }
                 }), true)
+            }
+        }))
+    }, openVoiceMessagePrivacy: {
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        let signal = combineLatest(
+            context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId)),
+            privacySettingsPromise.get()
+        )
+        |> take(1)
+        |> deliverOnMainQueue
+        currentInfoDisposable.set(signal.start(next: { [weak currentInfoDisposable] peer, info in
+            let isPremium = peer?.isPremium ?? false
+            
+            if isPremium {
+                if let info = info {
+                    pushControllerImpl?(selectivePrivacySettingsController(context: context, kind: .voiceMessages, current: info.voiceMessages, updated: { updated, _, _ in
+                        if let currentInfoDisposable = currentInfoDisposable {
+                            let applySetting: Signal<Void, NoError> = privacySettingsPromise.get()
+                                |> filter { $0 != nil }
+                                |> take(1)
+                                |> deliverOnMainQueue
+                                |> mapToSignal { value -> Signal<Void, NoError> in
+                                    if let value = value {
+                                        privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: updated, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
+                                    }
+                                    return .complete()
+                            }
+                            currentInfoDisposable.set(applySetting.start())
+                        }
+                    }), true)
+                }
+            } else {
+                let hapticFeedback = HapticFeedback()
+                hapticFeedback.impact()
+                
+                var alreadyPresented = false
+                presentControllerImpl?(UndoOverlayController(presentationData: presentationData, content: .info(title: nil, text: presentationData.strings.Privacy_VoiceMessages_Tooltip), elevatedLayout: false, animateInAsReplacement: false, action: { action in
+                    if action == .info {
+                        if !alreadyPresented {
+                            let controller = PremiumIntroScreen(context: context, source: .settings)
+                            pushControllerImpl?(controller, true)
+                            alreadyPresented = true
+                        }
+                        return true
+                    }
+                    return false
+                }))
             }
         }))
     }, openPasscode: {
@@ -762,7 +980,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         |> deliverOnMainQueue
         |> mapToSignal { value -> Signal<Void, NoError> in
             if let value = value {
-                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: archiveValue, accountRemovalTimeout: value.accountRemovalTimeout)))
+                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: archiveValue, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
             }
             return .complete()
         }
@@ -801,7 +1019,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                         |> deliverOnMainQueue
                         |> mapToSignal { value -> Signal<Void, NoError> in
                             if let value = value {
-                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: timeout)))
+                                privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: timeout, messageAutoremoveTimeout: value.messageAutoremoveTimeout)))
                             }
                             return .complete()
                         }
@@ -822,12 +1040,26 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                     6 * 30 * 24 * 60 * 60,
                     365 * 24 * 60 * 60
                 ]
-                let timeoutItems: [ActionSheetItem] = timeoutValues.map { value in
+                var timeoutItems: [ActionSheetItem] = timeoutValues.map { value in
                     return ActionSheetButtonItem(title: timeIntervalString(strings: presentationData.strings, value: value), action: {
                         dismissAction()
                         timeoutAction(value)
                     })
                 }
+                timeoutItems.append(ActionSheetButtonItem(title: presentationData.strings.PrivacySettings_DeleteAccountNow, color: .destructive, action: {
+                    dismissAction()
+                    
+                    guard let navigationController = getNavigationControllerImpl?() else {
+                        return
+                    }
+                    
+                    let _ = (combineLatest(twoStepAuth.get(), twoStepAuthDataValue.get())
+                    |> take(1)
+                    |> deliverOnMainQueue).start(next: { hasTwoStepAuth, twoStepAuthData in
+                        let optionsController = deleteAccountOptionsController(context: context, navigationController: navigationController, hasTwoStepAuth: hasTwoStepAuth ?? false, twoStepAuthData: twoStepAuthData)
+                        pushControllerImpl?(optionsController, true)
+                    })
+                }))
                 controller.setItemGroups([
                     ActionSheetItemGroup(items: timeoutItems),
                     ActionSheetItemGroup(items: [ActionSheetButtonItem(title: presentationData.strings.Common_Cancel, action: { dismissAction() })])
@@ -835,8 +1067,46 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
                 presentControllerImpl?(controller)
             }
         }))
+    }, setupMessageAutoremove: {
+        let signal = privacySettingsPromise.get()
+        |> take(1)
+        |> deliverOnMainQueue
+        updateAccountTimeoutDisposable.set(signal.start(next: { privacySettingsValue in
+            if let privacySettingsValue {
+                pushControllerImpl?(globalAutoremoveScreen(context: context, initialValue: privacySettingsValue.messageAutoremoveTimeout ?? 0, updated: { updatedValue in
+                    let applyTimeout: Signal<Void, NoError> = privacySettingsPromise.get()
+                    |> filter { $0 != nil }
+                    |> take(1)
+                    |> deliverOnMainQueue
+                    |> mapToSignal { value -> Signal<Void, NoError> in
+                        if let value = value {
+                            privacySettingsPromise.set(.single(AccountPrivacySettings(presence: value.presence, groupInvitations: value.groupInvitations, voiceCalls: value.voiceCalls, voiceCallsP2P: value.voiceCallsP2P, profilePhoto: value.profilePhoto, forwards: value.forwards, phoneNumber: value.phoneNumber, phoneDiscoveryEnabled: value.phoneDiscoveryEnabled, voiceMessages: value.voiceMessages, automaticallyArchiveAndMuteNonContacts: value.automaticallyArchiveAndMuteNonContacts, accountRemovalTimeout: value.accountRemovalTimeout, messageAutoremoveTimeout: updatedValue == 0 ? nil : updatedValue)))
+                        }
+                        return .complete()
+                    }
+                    let _ = applyTimeout.start()
+                }), true)
+            }
+        }))
     }, openDataSettings: {
         pushControllerImpl?(dataPrivacyController(context: context), true)
+    }, openEmailSettings: { emailPattern in
+        if let emailPattern = emailPattern {
+            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+            let controller = textAlertController(
+                context: context, title: emailPattern, text: presentationData.strings.PrivacySettings_LoginEmailAlertText, actions: [
+                    TextAlertAction(type: .genericAction, title: presentationData.strings.PrivacySettings_LoginEmailAlertChange, action: {
+                        setupEmailImpl?(emailPattern)
+                    }),
+                    TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_Cancel, action: {
+                                        
+                    })
+                ], actionLayout: .vertical
+            )
+            presentControllerImpl?(controller)
+        } else {
+            setupEmailImpl?(nil)
+        }
     })
     
     actionsDisposable.add(context.engine.peers.managedUpdatedRecentPeers().start())
@@ -863,9 +1133,11 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         webSessionsContext.state,
         context.sharedContext.accountManager.accessChallengeData(),
         combineLatest(twoStepAuth.get(), twoStepAuthDataValue.get()),
-        context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.App())
+        context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.App()),
+        context.engine.data.subscribe(TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId)),
+        loginEmail
     )
-    |> map { presentationData, state, privacySettings, noticeView, sharedData, recentPeers, blockedPeersState, activeWebsitesState, accessChallengeData, twoStepAuth, appConfiguration -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, state, privacySettings, noticeView, sharedData, recentPeers, blockedPeersState, activeWebsitesState, accessChallengeData, twoStepAuth, appConfiguration, accountPeer, loginEmail -> (ItemListControllerState, (ItemListNodeState, Any)) in
         var canAutoarchive = false
         if let data = appConfiguration.data, let hasAutoarchive = data["autoarchive_setting_available"] as? Bool {
             canAutoarchive = hasAutoarchive
@@ -878,7 +1150,10 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(presentationData.strings.PrivacySettings_Title), leftNavigationButton: nil, rightNavigationButton: rightNavigationButton, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: false)
         
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: privacyAndSecurityControllerEntries(presentationData: presentationData, state: state, privacySettings: privacySettings, accessChallengeData: accessChallengeData.data, blockedPeerCount: blockedPeersState.totalCount, activeWebsitesCount: activeWebsitesState.sessions.count, hasTwoStepAuth: twoStepAuth.0, twoStepAuthData: twoStepAuth.1, canAutoarchive: canAutoarchive), style: .blocks, ensureVisibleItemTag: focusOnItemTag, animateChanges: false)
+        let isPremium = accountPeer?.isPremium ?? false
+        let isPremiumDisabled = PremiumConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 }).isPremiumDisabled
+        
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: privacyAndSecurityControllerEntries(presentationData: presentationData, state: state, privacySettings: privacySettings, accessChallengeData: accessChallengeData.data, blockedPeerCount: blockedPeersState.totalCount, activeWebsitesCount: activeWebsitesState.sessions.count, hasTwoStepAuth: twoStepAuth.0, twoStepAuthData: twoStepAuth.1, canAutoarchive: canAutoarchive, isPremiumDisabled: isPremiumDisabled, isPremium: isPremium, loginEmail: loginEmail), style: .blocks, ensureVisibleItemTag: focusOnItemTag, animateChanges: false)
         
         return (controllerState, (listState, arguments))
     }
@@ -886,7 +1161,7 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         actionsDisposable.dispose()
     }
     
-    let controller = ItemListController(context: context, state: signal)
+    let controller = PrivacyAndSecurityControllerImpl(context: context, state: signal)
     pushControllerImpl = { [weak controller] c, animated in
         (controller?.navigationController as? NavigationController)?.pushViewController(c, animated: animated)
     }
@@ -894,11 +1169,193 @@ public func privacyAndSecurityController(context: AccountContext, initialSetting
         (controller?.navigationController as? NavigationController)?.replaceTopController(c, animated: true)
     }
     presentControllerImpl = { [weak controller] c in
-        controller?.present(c, in: .window(.root), with: ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
+        controller?.present(c, in: .window(.root), with: nil)
     }
-    
+    getNavigationControllerImpl = {  [weak controller] in
+        return (controller?.navigationController as? NavigationController)
+    }
+
     controller.didAppear = { _ in
         updateHasTwoStepAuth()
+    }
+    
+    let emailChangeCompletion: (AuthorizationSequenceCodeEntryController?) -> Void = { codeController in
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        codeController?.animateSuccess()
+        
+        updatedTwoStepAuthData?()
+        
+        Queue.mainQueue().after(0.75) {
+            if let navigationController = getNavigationControllerImpl?() {
+                let controllers = navigationController.viewControllers.filter { controller in
+                    if controller is AuthorizationSequenceEmailEntryController || controller is AuthorizationSequenceCodeEntryController {
+                        return false
+                    } else {
+                        return true
+                    }
+                }
+                navigationController.setViewControllers(controllers, animated: true)
+                
+                Queue.mainQueue().after(0.5, {
+                    navigationController.presentOverlay(controller: UndoOverlayController(presentationData: presentationData, content: .emoji(name: "IntroLetter", text: presentationData.strings.Login_EmailChanged), elevatedLayout: false, animateInAsReplacement: false, action: { _ in
+                        return false
+                    }))
+                })
+            }
+        }
+    }
+    
+    setupEmailImpl = { emailPattern in
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        var dismissEmailControllerImpl: (() -> Void)?
+        var presentControllerImpl: ((ViewController) -> Void)?
+        
+        let emailController = AuthorizationSequenceEmailEntryController(presentationData: presentationData, mode: emailPattern != nil ? .change : .setup, back: {
+            dismissEmailControllerImpl?()
+        })
+        emailController.proceedWithEmail = { [weak emailController] email in
+            emailController?.inProgress = true
+            
+            actionsDisposable.add((sendLoginEmailChangeCode(account: context.account, email: email)
+            |> deliverOnMainQueue).start(next: { data in
+                var dismissCodeControllerImpl: (() -> Void)?
+                var presentControllerImpl: ((ViewController) -> Void)?
+                
+                let codeController = AuthorizationSequenceCodeEntryController(presentationData: presentationData, back: {
+                    dismissCodeControllerImpl?()
+                })
+                
+                presentControllerImpl = { [weak codeController] c in
+                    codeController?.present(c, in: .window(.root), with: nil)
+                }
+                 
+                codeController.loginWithCode = { [weak codeController] code in
+                    actionsDisposable.add((verifyLoginEmailChange(account: context.account, code: .emailCode(code))
+                    |> deliverOnMainQueue).start(error: { error in
+                        Queue.mainQueue().async {
+                            codeController?.inProgress = false
+                            
+                            if case .invalidCode = error {
+                                codeController?.animateError(text: presentationData.strings.Login_WrongCodeError)
+                            } else {
+                                var resetCode = false
+                                let text: String
+                                switch error {
+                                    case .limitExceeded:
+                                        resetCode = true
+                                        text = presentationData.strings.Login_CodeFloodError
+                                    case .invalidCode:
+                                        resetCode = true
+                                        text = presentationData.strings.Login_InvalidCodeError
+                                    case .generic:
+                                        text = presentationData.strings.Login_UnknownError
+                                    case .codeExpired:
+                                        text = presentationData.strings.Login_CodeExpired
+                                    case .timeout:
+                                        text = presentationData.strings.Login_NetworkError
+                                    case .invalidEmailToken:
+                                        text = presentationData.strings.Login_InvalidEmailTokenError
+                                    case .emailNotAllowed:
+                                        text = presentationData.strings.Login_EmailNotAllowedError
+                                }
+                                
+                                if resetCode {
+                                    codeController?.resetCode()
+                                }
+                                    
+                                presentControllerImpl?(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]))
+                            }
+                        }
+                    }, completed: { [weak codeController] in
+                       emailChangeCompletion(codeController)
+                    }))
+                }
+                codeController.updateData(number: "", email: email, codeType: .email(emailPattern: "", length: data.length, nextPhoneLoginDate: nil, appleSignInAllowed: false, setup: true), nextType: nil, timeout: nil, termsOfService: nil)
+                pushControllerImpl?(codeController, true)
+                dismissCodeControllerImpl = { [weak codeController] in
+                    codeController?.dismiss()
+                }
+            }, error: { [weak emailController] error in
+                emailController?.inProgress = false
+                
+                let text: String
+                switch error {
+                    case .limitExceeded:
+                        text = presentationData.strings.Login_CodeFloodError
+                    case .generic, .codeExpired:
+                        text = presentationData.strings.Login_UnknownError
+                    case .timeout:
+                        text = presentationData.strings.Login_NetworkError
+                    case .invalidEmail:
+                        text = presentationData.strings.Login_InvalidEmailError
+                    case .emailNotAllowed:
+                        text = presentationData.strings.Login_EmailNotAllowedError
+                }
+                
+                presentControllerImpl?(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]))
+            }, completed: { [weak emailController] in
+                emailController?.inProgress = false
+            }))
+        }
+        emailController.signInWithApple = { [weak controller, weak emailController] in
+            if #available(iOS 13.0, *) {
+                let appleIdProvider = ASAuthorizationAppleIDProvider()
+                let request = appleIdProvider.createRequest()
+                request.requestedScopes = [.email]
+
+                let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+                authorizationController.delegate = controller
+                authorizationController.presentationContextProvider = controller
+                authorizationController.performRequests()
+                
+                controller?.authorizationCompletion = { [weak controller, weak emailController] credential in
+                    guard let credential = credential as? ASAuthorizationCredential else {
+                        return
+                    }
+                    switch credential {
+                        case let appleIdCredential as ASAuthorizationAppleIDCredential:
+                            guard let tokenData = appleIdCredential.identityToken, let token = String(data: tokenData, encoding: .utf8) else {
+                                emailController?.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: presentationData.strings.Login_UnknownError, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                                return
+                            }
+                            actionsDisposable.add((verifyLoginEmailChange(account: context.account, code: .appleToken(token))
+                            |> deliverOnMainQueue).start(error: { error in
+                                let text: String
+                                switch error {
+                                    case .limitExceeded:
+                                        text = presentationData.strings.Login_CodeFloodError
+                                    case .generic, .codeExpired:
+                                        text = presentationData.strings.Login_UnknownError
+                                    case .invalidCode:
+                                        text = presentationData.strings.Login_InvalidCodeError
+                                    case .timeout:
+                                        text = presentationData.strings.Login_NetworkError
+                                    case .invalidEmailToken:
+                                        text = presentationData.strings.Login_InvalidEmailTokenError
+                                    case .emailNotAllowed:
+                                        text = presentationData.strings.Login_EmailNotAllowedError
+                                }
+                                emailController?.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                            }, completed: { [weak controller] in
+                                controller?.authorizationCompletion = nil
+                                emailChangeCompletion(nil)
+                            }))
+                        default:
+                            break
+                    }
+                }
+            }
+        }
+        emailController.updateData(appleSignInAllowed: true)
+        pushControllerImpl?(emailController, true)
+        
+        presentControllerImpl = { [weak emailController] c in
+            emailController?.present(c, in: .window(.root), with: nil)
+        }
+        
+        dismissEmailControllerImpl = { [weak emailController] in
+            emailController?.dismiss()
+        }
     }
     
     return controller

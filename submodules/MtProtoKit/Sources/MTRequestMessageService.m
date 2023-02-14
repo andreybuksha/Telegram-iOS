@@ -111,8 +111,8 @@
             {
                 if (request.requestContext != nil)
                 {
-                    [_dropReponseContexts addObject:[[MTDropResponseContext alloc] initWithDropMessageId:request.requestContext.messageId]];
-                    anyNewDropRequests = true;
+                    //[_dropReponseContexts addObject:[[MTDropResponseContext alloc] initWithDropMessageId:request.requestContext.messageId]];
+                    //anyNewDropRequests = true;
                 }
                 
                 if (request.requestContext.messageId != 0) {
@@ -783,6 +783,8 @@
                                 authInfo = [authInfo withUpdatedAuthKeyAttributes:authKeyAttributes];
                                 [_context updateAuthInfoForDatacenterWithId:mtProto.datacenterId authInfo:authInfo selector:authInfoSelector];
                             }];
+                            
+                            restartRequest = true;
                         } else if (rpcError.errorCode == 406) {
                             if (_didReceiveSoftAuthResetError) {
                                 _didReceiveSoftAuthResetError();

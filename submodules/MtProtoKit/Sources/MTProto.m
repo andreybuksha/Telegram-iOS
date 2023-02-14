@@ -171,9 +171,11 @@ static const NSUInteger MTMaxUnacknowledgedMessageCount = 64;
         
         _sessionInfo = [[MTSessionInfo alloc] initWithRandomSessionIdAndContext:_context];
         
-        
-        
         _shouldStayConnected = true;
+        
+        _mtState |= MTProtoStatePaused;
+        
+        [self setMtState:_mtState | MTProtoStatePaused];
     }
     return self;
 }
@@ -655,6 +657,15 @@ static const NSUInteger MTMaxUnacknowledgedMessageCount = 64;
     }];
 }
 
+- (void)simulateDisconnection {
+    [[MTProto managerQueue] dispatchOnQueue:^
+    {
+        if (_transport != nil) {
+            [_transport simulateDisconnection];
+        }
+    }];
+}
+
 - (bool)canAskForTransactions
 {
     return (_mtState & (MTProtoStateAwaitingDatacenterScheme | MTProtoStateAwaitingDatacenterAuthorization | MTProtoStateAwaitingDatacenterAuthToken | MTProtoStateAwaitingTimeFixAndSalts | MTProtoStateStopped)) == 0;
@@ -705,8 +716,12 @@ static const NSUInteger MTMaxUnacknowledgedMessageCount = 64;
 
 - (void)transportConnectionFailed:(MTTransport *)transport scheme:(MTTransportScheme *)scheme {
     [[MTProto managerQueue] dispatchOnQueue:^{
-        if (transport != _transport)
+        if (transport != _transport) {
             return;
+        }
+        if (_useUnauthorizedMode) {
+            return;
+        }
         [_context reportTransportSchemeFailureForDatacenterId:_datacenterId transportScheme:scheme];
     }];
 }
@@ -766,6 +781,12 @@ static const NSUInteger MTMaxUnacknowledgedMessageCount = 64;
     [[MTProto managerQueue] dispatchOnQueue:^ {
         if (_transport != transport) {
             return;
+        }
+        if (_useUnauthorizedMode) {
+#if DEBUG
+#else
+            return;
+#endif
         }
         
         if (hasConnectionProblems) {
@@ -2032,7 +2053,9 @@ static NSString *dumpHexString(NSData *data, int maxLength) {
                 }
                 MTShortLog(@"[MTProto#%p@%p incoming data parse error, header: %d:%@]", self, _context, (int)decryptedData.length, dumpHexString(decryptedData, 128));
                 
-                [_context reportTransportSchemeFailureForDatacenterId:_datacenterId transportScheme:scheme];
+                if (!_useUnauthorizedMode) {
+                    [_context reportTransportSchemeFailureForDatacenterId:_datacenterId transportScheme:scheme];
+                }
                 [self transportTransactionsMayHaveFailed:transport transactionIds:@[transactionId]];
                 
                 [self resetSessionInfo];
@@ -2058,7 +2081,9 @@ static NSString *dumpHexString(NSData *data, int maxLength) {
                 decodeResult(transactionId, false);
             
             [self transportTransactionsMayHaveFailed:transport transactionIds:@[transactionId]];
-            [_context reportTransportSchemeFailureForDatacenterId:_datacenterId transportScheme:scheme];
+            if (!_useUnauthorizedMode) {
+                [_context reportTransportSchemeFailureForDatacenterId:_datacenterId transportScheme:scheme];
+            }
             
             [self requestSecureTransportReset];
         }
@@ -2573,9 +2598,11 @@ static bool isDataEqualToDataConstTime(NSData *data1, NSData *data2) {
                 resolvedShouldReset = true;
             }
             
-            if (resolvedShouldReset) {
-                [self resetTransport];
-                [self requestTransportTransaction];
+            if ((_mtState & MTProtoStateAwaitingDatacenterAuthorization) == 0 && (_mtState & MTProtoStatePaused) == 0) {
+                if (resolvedShouldReset) {
+                    [self resetTransport];
+                    [self requestTransportTransaction];
+                }
             }
         }
     }];

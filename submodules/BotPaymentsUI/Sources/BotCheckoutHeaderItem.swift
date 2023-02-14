@@ -8,18 +8,21 @@ import TelegramPresentationData
 import ItemListUI
 import PresentationDataUtils
 import PhotoResources
+import Postbox
 
 class BotCheckoutHeaderItem: ListViewItem, ItemListItem {
     let account: Account
     let theme: PresentationTheme
     let invoice: TelegramMediaInvoice
+    let source: BotPaymentInvoiceSource
     let botName: String
     let sectionId: ItemListSectionId
     
-    init(account: Account, theme: PresentationTheme, invoice: TelegramMediaInvoice, botName: String, sectionId: ItemListSectionId) {
+    init(account: Account, theme: PresentationTheme, invoice: TelegramMediaInvoice, source: BotPaymentInvoiceSource, botName: String, sectionId: ItemListSectionId) {
         self.account = account
         self.theme = theme
         self.invoice = invoice
+        self.source = source
         self.botName = botName
         self.sectionId = sectionId
     }
@@ -77,6 +80,8 @@ class BotCheckoutHeaderItemNode: ListViewItemNode {
     
     private var item: BotCheckoutHeaderItem?
     
+    private let fetchDisposable = MetaDisposable()
+    
     init() {
         self.backgroundNode = ASDisplayNode()
         self.backgroundNode.isLayerBacked = true
@@ -119,6 +124,10 @@ class BotCheckoutHeaderItemNode: ListViewItemNode {
         self.addSubnode(self.botNameNode)
     }
     
+    deinit {
+        self.fetchDisposable.dispose()
+    }
+    
     func asyncLayout() -> (_ item: BotCheckoutHeaderItem, _ params: ListViewItemLayoutParams, _ neighbors: ItemListNeighbors) -> (ListViewItemNodeLayout, () -> Void) {
         let makeTitleLayout = TextNode.asyncLayout(self.titleNode)
         let makeTextLayout = TextNode.asyncLayout(self.textNode)
@@ -159,12 +168,22 @@ class BotCheckoutHeaderItemNode: ListViewItemNode {
             
             var imageApply: (() -> Void)?
             var updatedImageSignal: Signal<(TransformImageArguments) -> DrawingContext?, NoError>?
+            var updatedFetchSignal: Signal<FetchResourceSourceType, FetchResourceError>?
             if let photo = item.invoice.photo, let dimensions = photo.dimensions {
                 let arguments = TransformImageArguments(corners: ImageCorners(radius: 4.0), imageSize: dimensions.cgSize.aspectFilled(imageSize), boundingSize: imageSize, intrinsicInsets: UIEdgeInsets(), emptyColor: item.theme.list.mediaPlaceholderColor)
                 imageApply = makeImageLayout(arguments)
                 maxTextWidth = max(1.0, maxTextWidth - imageSize.width - imageTextSpacing)
                 if imageUpdated {
                     updatedImageSignal = chatWebFileImage(account: item.account, file: photo)
+                    
+                    var userLocation: MediaResourceUserLocation = .other
+                    switch item.source {
+                    case let .message(messageId):
+                        userLocation = .peer(messageId.peerId)
+                    default:
+                        break
+                    }
+                    updatedFetchSignal = fetchedMediaResource(mediaBox: item.account.postbox.mediaBox, userLocation: userLocation, userContentType: .image, reference: .standalone(resource: photo.resource))
                 }
             }
             
@@ -205,6 +224,9 @@ class BotCheckoutHeaderItemNode: ListViewItemNode {
                         let _ = imageApply()
                         if let updatedImageSignal = updatedImageSignal {
                             strongSelf.imageNode.setSignal(updatedImageSignal)
+                        }
+                        if let updatedFetchSignal = updatedFetchSignal {
+                            strongSelf.fetchDisposable.set(updatedFetchSignal.start())
                         }
                         strongSelf.imageNode.isHidden = false
                     } else {

@@ -12,7 +12,7 @@ open class SparseNode: ASDisplayNode {
         if !self.bounds.contains(point) {
             return nil
         }
-        for view in self.view.subviews {
+        for view in self.view.subviews.reversed() {
             if let result = view.hitTest(self.view.convert(point, to: view), with: event), result.isUserInteractionEnabled {
                 return result
             }
@@ -20,6 +20,26 @@ open class SparseNode: ASDisplayNode {
         
         let result = super.hitTest(point, with: event)
         if result != self.view {
+            return result
+        } else {
+            return nil
+        }
+    }
+}
+
+open class SparseContainerView: UIView {
+    override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if self.alpha.isZero {
+            return nil
+        }
+        for view in self.subviews.reversed() {
+            if let result = view.hitTest(self.convert(point, to: view), with: event), result.isUserInteractionEnabled {
+                return result
+            }
+        }
+        
+        let result = super.hitTest(point, with: event)
+        if result != self {
             return result
         } else {
             return nil
@@ -90,24 +110,24 @@ public final class NavigationBarPresentationData {
     }
 }
 
-enum NavigationPreviousAction: Equatable {
+public enum NavigationPreviousAction: Equatable {
     case item(UINavigationItem)
     case close
     
-    static func ==(lhs: NavigationPreviousAction, rhs: NavigationPreviousAction) -> Bool {
+    public static func ==(lhs: NavigationPreviousAction, rhs: NavigationPreviousAction) -> Bool {
         switch lhs {
-            case let .item(lhsItem):
-                if case let .item(rhsItem) = rhs, lhsItem === rhsItem {
-                    return true
-                } else {
-                    return false
-                }
-            case .close:
-                if case .close = rhs {
-                    return true
-                } else {
-                    return false
-                }
+        case let .item(lhsItem):
+            if case let .item(rhsItem) = rhs, lhsItem === rhsItem {
+                return true
+            } else {
+                return false
+            }
+        case .close:
+            if case .close = rhs {
+                return true
+            } else {
+                return false
+            }
         }
     }
 }
@@ -223,7 +243,7 @@ public final class NavigationBackgroundNode: ASDisplayNode {
         self.updateBackgroundBlur(forceKeepBlur: forceKeepBlur)
     }
 
-    public func update(size: CGSize, cornerRadius: CGFloat = 0.0, transition: ContainedViewLayoutTransition) {
+    public func update(size: CGSize, cornerRadius: CGFloat = 0.0, transition: ContainedViewLayoutTransition, beginWithCurrentState: Bool = true) {
         self.validLayout = (size, cornerRadius)
 
         let contentFrame = CGRect(origin: CGPoint(), size: size)
@@ -266,12 +286,167 @@ public final class NavigationBackgroundNode: ASDisplayNode {
     }
 }
 
+open class BlurredBackgroundView: UIView {
+    private var _color: UIColor?
+
+    private var enableBlur: Bool
+
+    private var effectView: UIVisualEffectView?
+    private let backgroundView: UIView
+
+    private var validLayout: (CGSize, CGFloat)?
+    
+    public var backgroundCornerRadius: CGFloat {
+        if let (_, cornerRadius) = self.validLayout {
+            return cornerRadius
+        } else {
+            return 0.0
+        }
+    }
+
+    public init(color: UIColor?, enableBlur: Bool = true) {
+        self._color = nil
+        self.enableBlur = enableBlur
+
+        self.backgroundView = UIView()
+
+        super.init(frame: CGRect())
+
+        self.addSubview(self.backgroundView)
+
+        if let color = color {
+            self.updateColor(color: color, transition: .immediate)
+        }
+    }
+    
+    required public init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func updateBackgroundBlur(forceKeepBlur: Bool) {
+        if let color = self._color, self.enableBlur && !sharedIsReduceTransparencyEnabled && ((color.alpha > .ulpOfOne && color.alpha < 0.95) || forceKeepBlur) {
+            if self.effectView == nil {
+                let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .light))
+                //effectView.isHidden = true
+
+                for subview in effectView.subviews {
+                    if subview.description.contains("VisualEffectSubview") {
+                        subview.isHidden = true
+                    }
+                }
+
+                if let sublayer = effectView.layer.sublayers?[0], let filters = sublayer.filters {
+                    sublayer.backgroundColor = nil
+                    sublayer.isOpaque = false
+                    //sublayer.setValue(true as NSNumber, forKey: "allowsInPlaceFiltering")
+                    let allowedKeys: [String] = [
+                        "colorSaturate",
+                        "gaussianBlur"
+                    ]
+                    sublayer.filters = filters.filter { filter in
+                        guard let filter = filter as? NSObject else {
+                            return true
+                        }
+                        let filterName = String(describing: filter)
+                        if !allowedKeys.contains(filterName) {
+                            return false
+                        }
+                        return true
+                    }
+                }
+
+                if let (size, cornerRadius) = self.validLayout {
+                    effectView.frame = CGRect(origin: CGPoint(), size: size)
+                    ContainedViewLayoutTransition.immediate.updateCornerRadius(layer: effectView.layer, cornerRadius: cornerRadius)
+                    effectView.clipsToBounds = !cornerRadius.isZero
+                }
+                self.effectView = effectView
+                self.insertSubview(effectView, at: 0)
+            }
+        } else if let effectView = self.effectView {
+            self.effectView = nil
+            effectView.removeFromSuperview()
+        }
+    }
+
+    public func updateColor(color: UIColor, enableBlur: Bool? = nil, forceKeepBlur: Bool = false, transition: ContainedViewLayoutTransition) {
+        let effectiveEnableBlur = enableBlur ?? self.enableBlur
+
+        if self._color == color && self.enableBlur == effectiveEnableBlur {
+            return
+        }
+        self._color = color
+        self.enableBlur = effectiveEnableBlur
+
+        if sharedIsReduceTransparencyEnabled {
+            transition.updateBackgroundColor(layer: self.backgroundView.layer, color: color.withAlphaComponent(1.0))
+        } else {
+            transition.updateBackgroundColor(layer: self.backgroundView.layer, color: color)
+        }
+
+        self.updateBackgroundBlur(forceKeepBlur: forceKeepBlur)
+    }
+
+    public func update(size: CGSize, cornerRadius: CGFloat = 0.0, maskedCorners: CACornerMask = [.layerMaxXMaxYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMinXMinYCorner], transition: ContainedViewLayoutTransition) {
+        self.validLayout = (size, cornerRadius)
+
+        let contentFrame = CGRect(origin: CGPoint(), size: size)
+        transition.updateFrame(view: self.backgroundView, frame: contentFrame, beginWithCurrentState: true)
+        if let effectView = self.effectView, effectView.frame != contentFrame {
+            transition.updateFrame(layer: effectView.layer, frame: contentFrame, beginWithCurrentState: true)
+            if let sublayers = effectView.layer.sublayers {
+                for sublayer in sublayers {
+                    transition.updateFrame(layer: sublayer, frame: contentFrame, beginWithCurrentState: true)
+                }
+            }
+        }
+        
+        if #available(iOS 11.0, *) {
+            self.backgroundView.layer.maskedCorners = maskedCorners
+        }
+
+        transition.updateCornerRadius(layer: self.backgroundView.layer, cornerRadius: cornerRadius)
+        if let effectView = self.effectView {
+            transition.updateCornerRadius(layer: effectView.layer, cornerRadius: cornerRadius)
+            effectView.clipsToBounds = !cornerRadius.isZero
+            
+            if #available(iOS 11.0, *) {
+                effectView.layer.maskedCorners = maskedCorners
+            }
+        }
+    }
+    
+    public func update(size: CGSize, cornerRadius: CGFloat = 0.0, animator: ControlledTransitionAnimator) {
+        self.validLayout = (size, cornerRadius)
+
+        let contentFrame = CGRect(origin: CGPoint(), size: size)
+        animator.updateFrame(layer: self.backgroundView.layer, frame: contentFrame, completion: nil)
+        if let effectView = self.effectView, effectView.frame != contentFrame {
+            animator.updateFrame(layer: effectView.layer, frame: contentFrame, completion: nil)
+            if let sublayers = effectView.layer.sublayers {
+                for sublayer in sublayers {
+                    animator.updateFrame(layer: sublayer, frame: contentFrame, completion: nil)
+                }
+            }
+        }
+
+        animator.updateCornerRadius(layer: self.backgroundView.layer, cornerRadius: cornerRadius, completion: nil)
+        if let effectView = self.effectView {
+            animator.updateCornerRadius(layer: effectView.layer, cornerRadius: cornerRadius, completion: nil)
+            effectView.clipsToBounds = !cornerRadius.isZero
+        }
+    }
+}
+
+public protocol NavigationBarHeaderView: UIView {
+}
+
 open class NavigationBar: ASDisplayNode {
     public static var defaultSecondaryContentHeight: CGFloat {
         return 38.0
     }
     
-    static func backArrowImage(color: UIColor) -> UIImage? {
+    public static func backArrowImage(color: UIColor) -> UIImage? {
         var red: CGFloat = 0.0
         var green: CGFloat = 0.0
         var blue: CGFloat = 0.0
@@ -311,12 +486,13 @@ open class NavigationBar: ASDisplayNode {
         }
     }
     
-    private let stripeNode: ASDisplayNode
-    private let clippingNode: SparseNode
+    public let stripeNode: ASDisplayNode
+    public let clippingNode: SparseNode
     private let buttonsContainerNode: ASDisplayNode
     
     public private(set) var contentNode: NavigationBarContentNode?
     public private(set) var secondaryContentNode: ASDisplayNode?
+    public var secondaryContentNodeDisplayFraction: CGFloat = 1.0
     
     private var itemTitleListenerKey: Int?
     private var itemTitleViewListenerKey: Int?
@@ -474,6 +650,23 @@ open class NavigationBar: ASDisplayNode {
         }
     }
     
+    public var customHeaderContentView: NavigationBarHeaderView? {
+        didSet {
+            if self.customHeaderContentView !== oldValue {
+                self.customHeaderContentView?.removeFromSuperview()
+                
+                if let customHeaderContentView = self.customHeaderContentView {
+                    self.buttonsContainerNode.view.addSubview(customHeaderContentView)
+                    self.backButtonNode.isHidden = true
+                    self.backButtonArrow.isHidden = true
+                } else {
+                    self.backButtonNode.isHidden = false
+                    self.backButtonArrow.isHidden = false
+                }
+            }
+        }
+    }
+    
     public var layoutSuspended: Bool = false
     
     private let titleNode: ImmediateTextNode
@@ -504,8 +697,15 @@ open class NavigationBar: ASDisplayNode {
             if self.rightButtonNode.supernode != nil {
                 addAccessibilityChildren(of: self.rightButtonNode, container: self, to: &accessibilityElements)
             }
+            if let customHeaderContentView = self.customHeaderContentView, customHeaderContentView.superview != nil {
+                customHeaderContentView.accessibilityFrame = UIAccessibility.convertToScreenCoordinates(customHeaderContentView.bounds, in: customHeaderContentView)
+                accessibilityElements.append(customHeaderContentView)
+            }
             if let contentNode = self.contentNode {
                 addAccessibilityChildren(of: contentNode, container: self, to: &accessibilityElements)
+            }
+            if let secondaryContentNode = self.secondaryContentNode {
+                addAccessibilityChildren(of: secondaryContentNode, container: self, to: &accessibilityElements)
             }
             return accessibilityElements
         } set(value) {
@@ -519,7 +719,7 @@ open class NavigationBar: ASDisplayNode {
     }
     
     var _previousItem: NavigationPreviousAction?
-    var previousItem: NavigationPreviousAction? {
+    public internal(set) var previousItem: NavigationPreviousAction? {
         get {
             return self._previousItem
         } set(value) {
@@ -997,6 +1197,7 @@ open class NavigationBar: ASDisplayNode {
             
             self.badgeNode.updateTheme(fillColor: self.presentationData.theme.buttonColor, strokeColor: self.presentationData.theme.buttonColor, textColor: self.presentationData.theme.badgeTextColor)
             
+            self.updateLeftButton(animated: false)
             self.requestLayout()
         }
     }
@@ -1028,7 +1229,7 @@ open class NavigationBar: ASDisplayNode {
             self.backgroundNode.update(size: backgroundFrame.size, transition: transition)
         }
         
-        let apparentAdditionalHeight: CGFloat = self.secondaryContentNode != nil ? NavigationBar.defaultSecondaryContentHeight : 0.0
+        let apparentAdditionalHeight: CGFloat = self.secondaryContentNode != nil ? (NavigationBar.defaultSecondaryContentHeight * self.secondaryContentNodeDisplayFraction) : 0.0
         
         let leftButtonInset: CGFloat = leftInset + 16.0
         let backButtonInset: CGFloat = leftInset + 27.0
@@ -1046,11 +1247,11 @@ open class NavigationBar: ASDisplayNode {
             case .expansion:
                 expansionHeight = contentNode.height
                 
-                let additionalExpansionHeight: CGFloat = self.secondaryContentNode != nil && appearsHidden ? NavigationBar.defaultSecondaryContentHeight : 0.0
+                let additionalExpansionHeight: CGFloat = self.secondaryContentNode != nil && appearsHidden ? (NavigationBar.defaultSecondaryContentHeight * self.secondaryContentNodeDisplayFraction) : 0.0
                 contentNodeFrame = CGRect(origin: CGPoint(x: 0.0, y: size.height - (appearsHidden ? 0.0 : additionalContentHeight) - expansionHeight - apparentAdditionalHeight - additionalExpansionHeight), size: CGSize(width: size.width, height: expansionHeight))
                 if appearsHidden {
                     if self.secondaryContentNode != nil {
-                        contentNodeFrame.origin.y += NavigationBar.defaultSecondaryContentHeight
+                        contentNodeFrame.origin.y += NavigationBar.defaultSecondaryContentHeight * self.secondaryContentNodeDisplayFraction
                     }
                 }
             }
@@ -1182,6 +1383,12 @@ open class NavigationBar: ASDisplayNode {
             leftTitleInset -= 1.0
         }
         
+        if let customHeaderContentView = self.customHeaderContentView {
+            let headerSize = CGSize(width: size.width, height: nominalHeight)
+            //customHeaderContentView.update(size: headerSize, transition: transition)
+            transition.updateFrame(view: customHeaderContentView, frame: CGRect(origin: CGPoint(x: 0.0, y: contentVerticalOrigin), size: headerSize))
+        }
+        
         if self.titleNode.supernode != nil {
             let titleSize = self.titleNode.updateLayout(CGSize(width: max(1.0, size.width - max(leftTitleInset, rightTitleInset) * 2.0), height: nominalHeight))
             
@@ -1299,6 +1506,22 @@ open class NavigationBar: ASDisplayNode {
         }
     }
     
+    public func makeTransitionBackButtonView(accentColor: UIColor) -> UIView? {
+        if self.backButtonNode.supernode != nil {
+            let node = NavigationButtonNode()
+            node.manualAlpha = self.backButtonNode.manualAlpha
+            node.updateManualText(self.backButtonNode.manualText)
+            node.color = accentColor
+            if let validLayout = self.validLayout {
+                let _ = node.updateLayout(constrainedSize: CGSize(width: validLayout.size.width, height: validLayout.defaultHeight), isLandscape: validLayout.isLandscape)
+                node.frame = self.backButtonNode.frame
+            }
+            return node.view
+        } else {
+            return nil
+        }
+    }
+    
     public func makeTransitionRightButtonNode(accentColor: UIColor) -> NavigationButtonNode? {
         if self.rightButtonNode.supernode != nil {
             let node = NavigationButtonNode()
@@ -1335,6 +1558,17 @@ open class NavigationBar: ASDisplayNode {
         }
     }
     
+    public func makeTransitionBackArrowView(accentColor: UIColor) -> UIView? {
+        if self.backButtonArrow.supernode != nil {
+            let view = UIImageView()
+            view.image = NavigationBar.backArrowImage(color: accentColor)
+            view.frame = self.backButtonArrow.frame
+            return view
+        } else {
+            return nil
+        }
+    }
+    
     public func makeTransitionBadgeNode() -> ASDisplayNode? {
         if self.badgeNode.supernode != nil && !self.badgeNode.isHidden {
             let node = NavigationBarBadgeNode(fillColor: self.presentationData.theme.buttonColor, strokeColor: self.presentationData.theme.buttonColor, textColor: self.presentationData.theme.badgeTextColor)
@@ -1348,6 +1582,7 @@ open class NavigationBar: ASDisplayNode {
     }
     
     public var intrinsicCanTransitionInline: Bool = true
+    public var shouldTransitionInline: (() -> Bool)?
     
     public var passthroughTouches = true
     
@@ -1355,6 +1590,11 @@ open class NavigationBar: ASDisplayNode {
         if let contentNode = self.contentNode, case .replacement = contentNode.mode {
             return false
         } else {
+            if let shouldTransitionInline = self.shouldTransitionInline {
+                if !shouldTransitionInline() {
+                    return false
+                }
+            }
             return self.intrinsicCanTransitionInline
         }
     }
@@ -1373,7 +1613,7 @@ open class NavigationBar: ASDisplayNode {
         }
         
         if let _ = self.secondaryContentNode {
-            result += NavigationBar.defaultSecondaryContentHeight
+            result += NavigationBar.defaultSecondaryContentHeight * self.secondaryContentNodeDisplayFraction
         }
         
         return result
@@ -1432,7 +1672,7 @@ open class NavigationBar: ASDisplayNode {
         if self.secondaryContentNode !== secondaryContentNode {
             if let previous = self.secondaryContentNode, previous.supernode === self.clippingNode {
                 if animated {
-                    previous.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak previous] finished in
+                    previous.layer.animateAlpha(from: previous.alpha, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak previous] finished in
                         if finished {
                             previous?.removeFromSupernode()
                             previous?.layer.removeAllAnimations()
@@ -1447,7 +1687,7 @@ open class NavigationBar: ASDisplayNode {
                 self.clippingNode.addSubnode(secondaryContentNode)
                 
                 if animated {
-                    secondaryContentNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
+                    secondaryContentNode.layer.animateAlpha(from: 0.0, to: secondaryContentNode.alpha, duration: 0.3)
                 }
             }
         }
